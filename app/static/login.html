@@ -88,6 +88,48 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14p
 .read.bad .verdict{color:#FFA9A2}
 .read.good .verdict{color:#7BE3AF}
 
+/* ---------- the solving animation ---------- */
+/* Everything with data-step starts folded away and is revealed in order, so
+   the panel reads as one issue being worked rather than a list of features. */
+.proof [data-step]{opacity:0;transform:translateY(6px);
+  transition:opacity .45s ease, transform .45s cubic-bezier(.2,.9,.3,1)}
+.proof [data-step].on{opacity:1;transform:none}
+
+.caret{display:inline-block;width:2px;height:16px;margin-left:2px;
+  background:#FFA98F;vertical-align:-2px;animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:0}}
+
+.flow{display:flex;align-items:center;gap:6px;margin-top:15px;flex-wrap:wrap}
+.fstep{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;
+  border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.02em;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  color:rgba(255,255,255,.5);transition:.35s}
+.fstep .dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.fstep.on{background:rgba(239,78,43,.18);border-color:rgba(255,140,110,.35);
+  color:#FFB39B}
+.fstep.on.fin{background:rgba(11,138,75,.2);border-color:rgba(74,214,145,.34);
+  color:#7BE3AF}
+.fstep.busy .dot{animation:pulse .7s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25;transform:scale(1.5)}}
+.farrow{color:rgba(255,255,255,.22);font-size:11px}
+
+.draftbox{margin-top:14px;padding:11px 13px;border-radius:12px;
+  background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.1)}
+.draftbox .dl{display:block;font-size:9.5px;font-weight:700;letter-spacing:.13em;
+  text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:6px}
+.draftbox .dt{font-size:12.5px;line-height:1.6;color:rgba(255,255,255,.88)}
+
+/* A looping animation is a distraction for anyone who has asked for less
+   motion, so they get the finished state instead of the performance. */
+@media (prefers-reduced-motion: reduce){
+  .proof [data-step]{opacity:1;transform:none;transition:none}
+  .caret{display:none}
+  .fstep{background:rgba(239,78,43,.18);border-color:rgba(255,140,110,.35);
+    color:#FFB39B}
+  .fstep.fin{background:rgba(11,138,75,.2);color:#7BE3AF}
+  .fstep .dot{animation:none}
+}
+
 .stats{display:flex;gap:30px;margin-top:auto;padding-top:34px;flex-wrap:wrap}
 .stat .n{font-size:21px;font-weight:800;letter-spacing:-.03em}
 .stat .c{font-size:11px;color:rgba(255,255,255,.42);margin-top:2px}
@@ -102,6 +144,16 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14p
   background:linear-gradient(140deg,#FF7A52,var(--brand) 58%,#C9381A);
   box-shadow:0 4px 14px rgba(239,78,43,.34)}
 .crest .wm{font-size:15.5px;font-weight:700;letter-spacing:-.02em}
+
+.modes{display:inline-flex;gap:3px;background:var(--surface-3);
+  border:1px solid var(--line);border-radius:10px;padding:3px;margin-bottom:20px}
+.modes button{height:30px;padding:0 15px;border:0;border-radius:7px;
+  background:transparent;color:var(--ink-3);font-size:12px;font-weight:700;
+  cursor:pointer;font-family:var(--sans);transition:.15s}
+.modes button:hover{color:var(--ink)}
+.modes button[aria-pressed="true"]{background:var(--surface);color:var(--brand);
+  box-shadow:0 1px 2px rgba(16,24,40,.06)}
+.note{font-size:11.5px;color:var(--ink-3);margin:-6px 0 16px;line-height:1.6}
 
 .eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
   color:var(--brand-600)}
@@ -201,19 +253,34 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
       </p>
     </div>
 
-    <div class="proof">
-      <div class="lbl">A real customer message</div>
-      <div class="said">bahut ganda service hai</div>
+    <div class="proof" id="demo">
+      <div class="lbl">One issue, start to finish</div>
+      <div class="said"><span id="dSaid"></span><span class="caret" id="dCaret"></span></div>
 
-      <div class="read bad">
+      <div class="read bad" data-step="1">
         <span class="ic">✕</span>
         <span class="who">Standard sentiment model</span>
         <span class="verdict">POSITIVE · 49.8%</span>
       </div>
-      <div class="read good">
+      <div class="read good" data-step="2">
         <span class="ic">✓</span>
         <span class="who">Support Coach</span>
         <span class="verdict">negative · 85/100 · high</span>
+      </div>
+
+      <div class="flow">
+        <span class="fstep" id="s3" data-step="3"><i class="dot"></i>Analyse</span>
+        <span class="farrow" data-step="4">→</span>
+        <span class="fstep" id="s4" data-step="4"><i class="dot"></i>Look up order</span>
+        <span class="farrow" data-step="5">→</span>
+        <span class="fstep" id="s5" data-step="5"><i class="dot"></i>Draft reply</span>
+        <span class="farrow" data-step="6">→</span>
+        <span class="fstep fin" id="s6" data-step="6"><i class="dot"></i>Resolved</span>
+      </div>
+
+      <div class="draftbox" data-step="5">
+        <span class="dl">Suggested reply</span>
+        <span class="dt" id="dReply"></span>
       </div>
     </div>
 
@@ -236,15 +303,29 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
         <div class="wm">Support Coach</div>
       </div>
 
-      <div class="eyebrow">Sign in</div>
-      <h2>Welcome back</h2>
-      <p class="sub">
+      <div class="modes" id="modes" role="group" aria-label="Sign in or create an account">
+        <button type="button" data-mode="signin" aria-pressed="true">Sign in</button>
+        <button type="button" data-mode="signup" aria-pressed="false">Create account</button>
+      </div>
+
+      <div class="eyebrow" id="eyebrow">Sign in</div>
+      <h2 id="headline">Welcome back</h2>
+      <p class="sub" id="sub">
         Customer transcripts are behind this. Use the account your team lead
         set up for you.
       </p>
 
       <div class="err" id="err" hidden>
         <span class="ic">⚠</span><span id="errText"></span>
+      </div>
+
+      <div class="field signup-only" id="fDisplay" hidden>
+        <label for="display">Your name <span style="color:var(--ink-3);font-weight:500">(optional)</span></label>
+        <div class="wrap">
+          <svg class="pre" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <input id="display" name="display_name" autocomplete="name"
+                 placeholder="Priya Sharma">
+        </div>
       </div>
 
       <div class="field">
@@ -271,12 +352,26 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
         </div>
       </div>
 
+      <div class="field signup-only" id="fConfirm" hidden>
+        <label for="confirm">Confirm password</label>
+        <div class="wrap">
+          <svg class="pre" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <input id="confirm" name="confirm" type="password"
+                 autocomplete="new-password" placeholder="••••••••">
+        </div>
+      </div>
+
+      <div class="note signup-only" id="roleNote" hidden>
+        New accounts are created as <b>agent</b> — the console and your own
+        cases. The dashboard and exports are granted separately.
+      </div>
+
       <button type="submit" id="submit">
         <span class="spin" id="spin" hidden></span>
         <span id="submitText">Sign in</span>
       </button>
 
-      <div class="hint">
+      <div class="hint" id="hint">
         No account yet? Accounts are created from the command line, not here —
         <code>python3 app/server.py --add-user</code>
       </div>
@@ -287,11 +382,49 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
 <script>
 const $ = id => document.getElementById(id);
 
+let mode = "signin";
+
 function busy(on){
   $("submit").disabled = on;
   $("spin").hidden = !on;
-  $("submitText").textContent = on ? "Signing in…" : "Sign in";
+  const labels = {
+    signin: on ? "Signing in…" : "Sign in",
+    signup: on ? "Creating…"   : "Create account",
+  };
+  $("submitText").textContent = labels[mode];
 }
+
+function setMode(next){
+  mode = next === "signup" ? "signup" : "signin";
+  $("err").hidden = true;
+
+  document.querySelectorAll(".signup-only")
+    .forEach(el => { el.hidden = mode !== "signup"; });
+  $("modes").querySelectorAll("button").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.mode === mode));
+
+  $("eyebrow").textContent = mode === "signup" ? "Create account" : "Sign in";
+  $("headline").textContent = mode === "signup" ? "Get started" : "Welcome back";
+  $("sub").textContent = mode === "signup"
+    ? "Pick a username and a password of at least 8 characters. You will be signed in straight away."
+    : "Customer transcripts are behind this. Use the account your team lead set up for you.";
+  $("hint").innerHTML = mode === "signup"
+    ? "Already have an account? Choose <b>Sign in</b> above."
+    : "No account? Choose <b>Create account</b> above, or make one from the command line with <code>python3 app/server.py --add-user</code>.";
+
+  $("password").setAttribute("autocomplete",
+    mode === "signup" ? "new-password" : "current-password");
+  busy(false);
+  (mode === "signup" ? $("display") : $("username")).focus();
+}
+
+$("modes").querySelectorAll("button").forEach(b => {
+  b.onclick = () => setMode(b.dataset.mode);
+});
+
+// Run once at load, so the sub-heading and the footer hint describe the mode
+// the page actually opens in rather than whatever the markup shipped with.
+setMode("signin");
 
 function fail(message){
   $("errText").textContent = message;
@@ -335,28 +468,123 @@ $("password").onkeydown = showCaps;
 $("password").onkeyup = showCaps;
 $("password").onblur = () => { $("caps").hidden = true; };
 
+/* ---------------- the solving animation ----------------
+ * One customer issue walked through the real pipeline: the message arrives,
+ * two models disagree about it, then analyse -> look up -> draft -> resolved.
+ * Plain setTimeout and two classes; no library, and it stops dead for anyone
+ * who has asked for reduced motion.
+ */
+const CALM = window.matchMedia
+  && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const SAID = "bahut ganda service hai";
+const REPLY = "I can see ₹499 was debited on 30 Aug and the recharge "
+            + "failed. Refund RF-9012 is processing, with you by 5 Sep.";
+
+function type(el, text, speed, done){
+  let i = 0;
+  el.textContent = "";
+  (function tick(){
+    el.textContent = text.slice(0, ++i);
+    if(i < text.length) setTimeout(tick, speed);
+    else if(done) setTimeout(done, 420);
+  })();
+}
+
+function reveal(step){
+  document.querySelectorAll(`#demo [data-step="${step}"]`)
+    .forEach(el => el.classList.add("on"));
+}
+
+// Each step glows while it is "working", then settles.
+function work(id, ms, next){
+  const chip = document.getElementById(id);
+  if(chip) chip.classList.add("on", "busy");
+  setTimeout(() => {
+    if(chip) chip.classList.remove("busy");
+    if(next) next();
+  }, ms);
+}
+
+function runDemo(){
+  const demo = document.getElementById("demo");
+  if(!demo) return;
+
+  if(CALM){                       // show the finished state, no performance
+    document.getElementById("dSaid").textContent = SAID;
+    document.getElementById("dReply").textContent = REPLY;
+    [1,2,3,4,5,6].forEach(reveal);
+    ["s3","s4","s5","s6"].forEach(id =>
+      document.getElementById(id).classList.add("on"));
+    return;
+  }
+
+  // reset
+  demo.querySelectorAll("[data-step]").forEach(el => el.classList.remove("on"));
+  ["s3","s4","s5","s6"].forEach(id =>
+    document.getElementById(id).classList.remove("on","busy"));
+  document.getElementById("dReply").textContent = "";
+  document.getElementById("dCaret").hidden = false;
+
+  type(document.getElementById("dSaid"), SAID, 55, () => {
+    document.getElementById("dCaret").hidden = true;
+    reveal(1);
+    setTimeout(() => {
+      reveal(2);
+      setTimeout(() => {
+        reveal(3);
+        work("s3", 900, () => {
+          reveal(4);
+          work("s4", 1100, () => {
+            reveal(5);
+            work("s5", 700, () => {
+              type(document.getElementById("dReply"), REPLY, 16, () => {
+                reveal(6);
+                document.getElementById("s6").classList.add("on");
+                setTimeout(runDemo, 4200);     // hold, then go round again
+              });
+            });
+          });
+        });
+      }, 700);
+    }, 800);
+  });
+}
+
+runDemo();
+
 $("form").addEventListener("submit", async e => {
   e.preventDefault();
   $("err").hidden = true;
   busy(true);
 
+  const next = new URLSearchParams(location.search).get("next") || "";
+  const signingUp = mode === "signup";
+
+  // Caught here rather than at the server, purely so the answer is instant.
+  // The server checks it again -- it cannot trust a browser.
+  if(signingUp && $("password").value !== $("confirm").value){
+    return fail("The two passwords do not match.");
+  }
+
+  const body = signingUp
+    ? {username: $("username").value.trim(), password: $("password").value,
+       confirm: $("confirm").value, display_name: $("display").value.trim(), next}
+    : {username: $("username").value.trim(), password: $("password").value, next};
+
   let data;
   try{
-    const res = await fetch("/api/login", {
+    const res = await fetch(signingUp ? "/api/register" : "/api/login", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        username: $("username").value.trim(),
-        password: $("password").value,
-        next: new URLSearchParams(location.search).get("next") || "",
-      }),
+      body: JSON.stringify(body),
     });
     data = await res.json();
   }catch(err){
     return fail("Could not reach the server. Is it still running?");
   }
 
-  if(!data.ok) return fail(data.error || "Sign in failed.");
+  if(!data.ok) return fail(data.error || (signingUp ? "Could not create that account." : "Sign in failed."));
 
   // The server decides, having checked both that the destination is a path
   // on this site and that this role can actually open it.
