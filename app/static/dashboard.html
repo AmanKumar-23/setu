@@ -13,6 +13,13 @@
   --green:#0B8A4B; --green-bg:#E7F5EC;
   --amber:#C97A00; --amber-bg:#FDF2E0;
   --red:#D6382F;   --red-bg:#FCEDEB;
+  /* who closed the case. AI reuses the brand, which already means
+     "handled without a person" on the deflection bar above it; hybrid
+     borrows the blue the score chart uses; human is a plain slate so the
+     eye reads it as the baseline rather than as another status. */
+  --ai:#EF4E2B;     --ai-bg:#FEF0EC;
+  --hybrid:#5B8DEF; --hybrid-bg:#EDF3FE;
+  --human:#64748B;  --human-bg:#F1F3F6;
   --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
   --sh-1:0 1px 2px rgba(16,24,40,.05);
@@ -163,6 +170,36 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14p
 .legend i{width:10px;height:10px;border-radius:3px;display:block}
 .legend .g{background:var(--green)} .legend .a{background:var(--amber)}
 .legend .b{background:var(--brand)}
+
+/* ---------- who resolved it ---------- */
+.prog .ai{background:linear-gradient(90deg,#FF7A52,var(--ai))}
+.prog .hyb{background:linear-gradient(90deg,#7FA8F4,var(--hybrid))}
+.prog .hum{background:linear-gradient(90deg,#8D99A8,var(--human))}
+.legend .ai{background:var(--ai)}
+.legend .hyb{background:var(--hybrid)}
+.legend .hum{background:var(--human)}
+.pill.ai_autonomous{background:var(--ai-bg);color:var(--ai)}
+.pill.hybrid{background:var(--hybrid-bg);color:var(--hybrid)}
+.pill.human{background:var(--human-bg);color:var(--human)}
+.pill.unresolved{background:var(--surface-3);color:var(--ink-3)}
+.coverage{margin-top:11px;font-size:11.5px;line-height:1.6;color:var(--ink-3)}
+.coverage b{color:var(--ink-2);font-weight:700}
+.splitnote{display:flex;gap:26px;flex-wrap:wrap;margin-top:18px;padding-top:16px;
+  border-top:1px solid var(--line)}
+.splitnote .k{font-size:10.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3)}
+.splitnote .v{font-size:23px;font-weight:800;letter-spacing:-.03em;margin-top:4px}
+.splitnote .v.ai{color:var(--ai)}
+.splitnote .v.hum{color:var(--human)}
+.splitnote .s{font-size:11.5px;color:var(--ink-3);margin-top:2px}
+.modechart .a-ai{fill:var(--ai);opacity:.85}
+.modechart .a-hyb{fill:var(--hybrid);opacity:.85}
+.modechart .a-hum{fill:var(--human);opacity:.85}
+.modechart .grid{stroke:var(--line);stroke-width:1}
+.modechart .zero{stroke:var(--line-2);stroke-width:1}
+.modechart text{font-family:var(--sans);fill:var(--ink-3)}
+.modechart .ylab,.modechart .xlab{font-size:10px}
+.modechart .hit{fill:transparent}
 
 /* ---------- breakdown bars ---------- */
 .brow{display:flex;align-items:center;gap:12px;margin-bottom:13px}
@@ -327,6 +364,65 @@ tbody tr:hover{background:var(--surface-2)}
 .chart .bpen{fill:var(--amber)}
 .chart .hit{fill:transparent}
 .chart .hit:hover ~ .bres,.chart .hit:hover ~ .bpen{opacity:.75}
+
+/* ---------- satisfaction ---------- */
+.kpi.csat::after{background:#7C5CD6}
+.kpi.csat .ico{background:#F1ECFC}
+.kpi.csat .v{color:#6B4BC7}
+.kpi.reply::after{background:var(--hybrid)}
+.kpi.reply .ico{background:var(--hybrid-bg)}
+.kpi.reply .v{color:var(--hybrid)}
+
+/* A small sample is shown, not hidden -- greyed and carrying its own count,
+   so "4.6 (3 ratings)" cannot be mistaken for a settled number. */
+.thin{opacity:.55}
+.samp{font-size:12px;font-weight:600;color:var(--ink-3);margin-left:7px;
+  letter-spacing:0}
+.outof{font-size:15px;font-weight:700;color:var(--ink-3);margin-left:2px}
+
+.modebars .brow .k{width:104px;flex:0 0 104px}
+.fill.m-ai{background:linear-gradient(90deg,#FF7A52,var(--ai))}
+.fill.m-hybrid{background:linear-gradient(90deg,#7FA8F4,var(--hybrid))}
+.fill.m-human{background:linear-gradient(90deg,#8D99A8,var(--human))}
+.barval{font-size:12.5px;font-weight:700;color:var(--ink-2);min-width:86px;
+  text-align:right}
+
+.catrow .k{width:132px;flex:0 0 132px;text-transform:none}
+.fill.cat{background:linear-gradient(90deg,#F2825F,var(--brand))}
+.catval{font-size:12.5px;color:var(--ink-2);min-width:96px;text-align:right;
+  font-family:var(--mono)}
+.catval b{color:var(--ink);font-weight:700}
+
+/* ---------- trends: range, exports, tooltip, loading ---------- */
+.rangebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.rangebar .flabel{font-size:10.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3)}
+.pacts{display:inline-flex;gap:6px;margin-left:auto}
+.btn.tiny{height:26px;padding:0 10px;font-size:11px;border-radius:7px}
+
+/* the chart sits in a relative box so the skeleton can cover exactly it,
+   which is what stops the panel changing height between states */
+.plot{position:relative}
+.chartskel{position:absolute;inset:0;border-radius:10px;pointer-events:none;
+  background:linear-gradient(90deg,var(--surface-3) 25%,var(--surface-2) 38%,
+    var(--surface-3) 62%);
+  background-size:300% 100%;animation:shimmer 1.35s ease-in-out infinite}
+@keyframes shimmer{from{background-position:100% 0}to{background-position:0 0}}
+.plot[data-loading="true"] svg{opacity:0}
+
+.charttip{position:fixed;z-index:60;pointer-events:none;min-width:168px;
+  background:var(--surface);border:1px solid var(--line-2);border-radius:11px;
+  box-shadow:var(--sh-2);padding:10px 12px;font-size:12px;color:var(--ink)}
+.charttip .tt-when{font-size:11.5px;font-weight:700;color:var(--ink);
+  margin-bottom:7px}
+.charttip .tt-row{display:flex;align-items:center;gap:8px;margin-top:4px;
+  white-space:nowrap}
+.charttip .tt-row i{width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+.charttip .tt-row .tt-k{color:var(--ink-2)}
+.charttip .tt-row .tt-v{margin-left:auto;font-family:var(--mono);font-weight:700}
+.charttip .tt-foot{margin-top:8px;padding-top:7px;border-top:1px solid var(--line);
+  font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+.chart .hit,.perfchart .hit{fill:transparent}
 
 /* ---------- filter toolbar ---------- */
 .toolbar{padding:14px 18px;border-bottom:1px solid var(--line);
@@ -528,9 +624,10 @@ tbody tr{cursor:pointer}
   <button class="snav" data-view="cases" type="button"><span class="si">🗂️</span><span class="sl">Cases</span><span class="sb" id="bCases" hidden></span><span class="sk">4</span></button>
   <button class="snav" data-view="trends" type="button"><span class="si">📈</span><span class="sl">Trends</span><span class="sk">5</span></button>
   <button class="snav" data-view="knowledge" type="button"><span class="si">📚</span><span class="sl">Knowledge</span><span class="sb" id="bGaps" hidden></span><span class="sk">6</span></button>
-  <button class="snav" data-view="cost" type="button"><span class="si">💰</span><span class="sl">Cost</span><span class="sb" id="bCost" hidden></span><span class="sk">7</span></button>
+  <button class="snav" data-view="actions" type="button"><span class="si">🛡️</span><span class="sl">Actions</span><span class="sb" id="bActions" hidden></span><span class="sk">7</span></button>
+  <button class="snav" data-view="cost" type="button"><span class="si">💰</span><span class="sl">Cost</span><span class="sb" id="bCost" hidden></span><span class="sk">8</span></button>
 
-  <div class="sidefoot">Press <kbd>1</kbd>–<kbd>7</kbd> to jump between
+  <div class="sidefoot">Press <kbd>1</kbd>–<kbd>8</kbd> to jump between
     sections. The view you pick is remembered.</div>
 </nav>
 
@@ -568,6 +665,16 @@ tbody tr{cursor:pointer}
           <div class="v" id="kRisk">0</div>
           <div class="sub" id="sRisk">Need attention first</div>
         </div>
+        <div class="kpi csat">
+          <div class="top"><div class="k">CSAT</div><div class="ico">⭐</div></div>
+          <div class="v" id="kCsat">—</div>
+          <div class="sub" id="sCsat">No ratings yet</div>
+        </div>
+        <div class="kpi reply">
+          <div class="top"><div class="k">Avg first reply</div><div class="ico">⏱️</div></div>
+          <div class="v" id="kReply">—</div>
+          <div class="sub" id="sReply">median · no replies yet</div>
+        </div>
       </div>
 
       <div class="grid2">
@@ -588,7 +695,45 @@ tbody tr{cursor:pointer}
               <div><i class="a"></i><span id="lgWait">0 pending</span></div>
             </div>
             <div style="margin-top:20px" id="riskBars"></div>
+
+            <div style="margin-top:22px;padding-top:18px;border-top:1px solid var(--line)">
+              <div class="k" style="font-size:10.5px;font-weight:700;
+                   letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);
+                   margin-bottom:11px">Resolved by</div>
+              <div class="prog">
+                <span class="ai"  id="pgAi"  style="width:0"></span>
+                <span class="hyb" id="pgHyb" style="width:0"></span>
+                <span class="hum" id="pgHum" style="width:0"></span>
+              </div>
+              <div class="legend">
+                <div><i class="ai"></i><span id="lgAi">0 AI autonomous</span></div>
+                <div><i class="hyb"></i><span id="lgHyb">0 hybrid</span></div>
+                <div><i class="hum"></i><span id="lgHum">0 human</span></div>
+              </div>
+              <div class="coverage" id="modeCoverage"></div>
+
+              <div class="splitnote">
+                <div>
+                  <div class="k">AI handled end to end</div>
+                  <div class="v ai" id="kAiE2E">0%</div>
+                  <div class="s" id="sAiE2E">of closed cases</div>
+                </div>
+                <div>
+                  <div class="k">Human touch rate</div>
+                  <div class="v hum" id="kHuman">0%</div>
+                  <div class="s">needed a person at some point</div>
+                </div>
+              </div>
+            </div>
           </div>
+        </div>
+
+        <div class="panel">
+          <div class="phead">
+            <span class="ptitle">Volume by category</span>
+            <span class="pmeta" id="catMeta"></span>
+          </div>
+          <div class="pbody"><div id="catBars"></div></div>
         </div>
 
         <div class="panel">
@@ -677,6 +822,8 @@ tbody tr{cursor:pointer}
               <span class="chips" id="fRisk"></span></span>
             <span class="fgroup"><span class="flabel">Sentiment</span>
               <span class="chips" id="fSentiment"></span></span>
+            <span class="fgroup"><span class="flabel">Resolved by</span>
+              <span class="chips" id="fMode"></span></span>
             <span class="grow"></span>
             <button class="btn" id="clearAll" hidden>Clear filters</button>
           </div>
@@ -692,18 +839,61 @@ tbody tr{cursor:pointer}
         <div class="vsub">Volume per day, agent scores as they move, and whether agents are actually using what the coach suggests.</div>
       </div>
 
+      <div class="rangebar">
+        <span class="flabel">Range</span>
+        <span class="chips" id="fRange"></span>
+        <span class="flabel" id="rangeNote" style="letter-spacing:0;
+              text-transform:none;font-weight:500"></span>
+      </div>
+
       <div class="panel">
         <div class="phead">
           <span class="ptitle">Cases opened per day</span>
           <span class="pmeta" id="chartMeta"></span>
+          <span class="pacts">
+            <button class="btn tiny" data-png="chart">PNG</button>
+            <button class="btn tiny" data-json="chart">JSON</button>
+          </span>
         </div>
         <div class="pbody">
-          <div class="chartwrap"><svg class="chart" id="chart"
-               viewBox="0 0 720 210" role="img" aria-label="Cases opened per day"></svg></div>
+          <div class="plot" id="plot-chart">
+            <div class="chartwrap"><svg class="chart" id="chart"
+                 viewBox="0 0 720 210" role="img" aria-label="Cases opened per day"></svg></div>
+          </div>
           <div class="legend" style="margin-top:6px">
             <div><i class="g"></i><span>Resolved</span></div>
             <div><i class="a"></i><span>Pending</span></div>
           </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="phead">
+          <span class="ptitle">Who is closing them, over time</span>
+          <span class="pmeta" id="modeMeta"></span>
+        </div>
+        <div class="pbody">
+          <div class="chartwrap"><svg class="chart modechart" id="modeChart"
+               viewBox="0 0 720 210" role="img"
+               aria-label="Cases closed per day by AI, hybrid and human"></svg></div>
+          <div class="legend" style="margin-top:6px">
+            <div><i class="ai"></i><span>AI autonomous</span></div>
+            <div><i class="hyb"></i><span>Hybrid</span></div>
+            <div><i class="hum"></i><span>Human</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="phead">
+          <span class="ptitle">Satisfaction by who resolved it</span>
+          <span class="pmeta" id="csatModeMeta"></span>
+        </div>
+        <div class="pbody">
+          <div class="modebars" id="csatModeBars"></div>
+          <div class="vsub" style="margin-top:14px">Average stars for the cases each
+            mode closed. A mode with few ratings is shown faintly with its count —
+            the comparison is only worth reading once the samples are comparable.</div>
         </div>
       </div>
 
@@ -712,16 +902,23 @@ tbody tr{cursor:pointer}
           <div class="phead">
             <span class="ptitle">Scores over time</span>
             <span class="pmeta" id="perfMeta"></span>
+            <span class="pacts">
+              <button class="btn tiny" data-png="perfChart">PNG</button>
+              <button class="btn tiny" data-json="perfChart">JSON</button>
+            </span>
           </div>
           <div class="pbody">
             <div id="trendCards" class="trends"></div>
-            <div style="overflow-x:auto"><svg class="perfchart" id="perfChart"
-                 viewBox="0 0 620 200" role="img"
-                 aria-label="Average tone, empathy and clarity over time"></svg></div>
+            <div class="plot" id="plot-perfChart">
+              <div style="overflow-x:auto"><svg class="perfchart" id="perfChart"
+                   viewBox="0 0 620 200" role="img"
+                   aria-label="Average tone, empathy and clarity over time"></svg></div>
+            </div>
             <div class="perflegend">
               <div><i style="background:#5B8DEF"></i><span>Tone</span></div>
               <div><i style="background:#0B8A4B"></i><span>Empathy</span></div>
               <div><i style="background:#C97A00"></i><span>Clarity</span></div>
+              <div><i style="background:#7C5CD6"></i><span>CSAT (right axis, 1–5)</span></div>
             </div>
           </div>
         </div>
@@ -783,6 +980,42 @@ tbody tr{cursor:pointer}
       </div>
     </section>
 
+
+    <section class="view" id="v-actions" data-view="actions" hidden>
+      <div class="vhead">
+        <div class="vtitle">Every action, proposed and decided</div>
+        <div class="vsub">The model can propose a data-changing action; only a person can run one. This is the record of what was asked for, who decided it, and what happened — including everything that was refused.</div>
+      </div>
+
+      <div class="panel">
+        <div class="phead">
+          <span class="ptitle">Audit trail</span>
+          <span class="pmeta" id="actMeta"></span>
+        </div>
+
+        <div class="toolbar">
+          <div class="tbrow">
+            <label class="search">
+              <span class="mag">🔍</span>
+              <input id="aq" type="search" autocomplete="off"
+                     placeholder="Search case ID, who decided, order ID, reference…">
+              <button class="clr" id="aqClear" hidden title="Clear search">×</button>
+            </label>
+            <button class="btn" id="actCsvBtn" data-needs="export" hidden>Export CSV</button>
+          </div>
+          <div class="tbrow">
+            <span class="fgroup"><span class="flabel">Action</span>
+              <span class="chips" id="fAction"></span></span>
+            <span class="fgroup"><span class="flabel">Decision</span>
+              <span class="chips" id="fDecision"></span></span>
+            <span class="grow"></span>
+            <button class="btn" id="actClearAll" hidden>Clear filters</button>
+          </div>
+        </div>
+
+        <div id="actTableWrap"></div>
+      </div>
+    </section>
 
     <section class="view" id="v-cost" data-view="cost" hidden>
       <div class="vhead">
@@ -935,7 +1168,7 @@ document.getElementById("signOut").onclick = async () => {
    Only one section is in the document flow at a time, so nothing has to be
    scrolled past to reach anything. The hidden ones stay in the DOM, which
    keeps load() free to write into them whether or not they are on screen. */
-const VIEWS = ["overview","queue","sla","cases","trends","knowledge","cost"];
+const VIEWS = ["overview","queue","sla","cases","trends","knowledge","actions","cost"];
 const DEFAULT_VIEW = "overview";
 let currentView = null;
 
@@ -958,6 +1191,7 @@ function showView(name, push){
   });
 
   $("main").scrollTop = 0;
+  if(name === "actions") loadActions();
   remember(name);
   if(push !== false && location.hash.slice(1) !== name)
     history.replaceState(null, "", "#" + name);
@@ -1042,7 +1276,12 @@ function when(iso){
 }
 
 async function load(){
-  const s = await (await fetch("/api/stats")).json();
+  const s = await (await fetch("/api/stats?range=" + chartRange)).json();
+  chartBucket = s.bucket || "day";
+  SERIES.chart = s.by_day || [];
+  setLoading("chart", false);
+  $("rangeNote").textContent = chartBucket === "hour"
+    ? "hourly buckets" : "one bucket per day";
 
   $("kTotal").textContent    = s.total;
   $("kResolved").textContent = s.resolved;
@@ -1076,6 +1315,40 @@ async function load(){
   $("lgDone").textContent = `${s.resolved} resolved`;
   $("lgWait").textContent = `${s.pending} pending`;
   $("rateMeta").textContent = s.total ? `${s.resolution_rate}% closed` : "";
+
+  // ---- who resolved them ----
+  // Percentages are of CLOSED cases, not of everything: an open case has no
+  // resolver yet, and counting it would drag every share down as the queue
+  // grows rather than as the work changes.
+  const m = s.by_mode || {ai_autonomous:0, hybrid:0, human:0};
+  const decided = s.modes_counted || 0;
+  const share = n => decided ? Math.round(100 * n / decided) : 0;
+  const shAi = share(m.ai_autonomous), shHyb = share(m.hybrid), shHum = share(m.human);
+
+  $("pgAi").style.width  = shAi  + "%";
+  $("pgHyb").style.width = shHyb + "%";
+  $("pgHum").style.width = shHum + "%";
+  $("pgAi").textContent  = m.ai_autonomous > 0 && shAi  > 12 ? m.ai_autonomous : "";
+  $("pgHyb").textContent = m.hybrid        > 0 && shHyb > 12 ? m.hybrid : "";
+  $("pgHum").textContent = m.human         > 0 && shHum > 12 ? m.human : "";
+  $("lgAi").textContent  = `${m.ai_autonomous} AI autonomous · ${shAi}%`;
+  $("lgHyb").textContent = `${m.hybrid} hybrid · ${shHyb}%`;
+  $("lgHum").textContent = `${m.human} human · ${shHum}%`;
+
+  // Say what the split covers. Presenting 16 cases' worth of shares without
+  // mentioning the other 14 reads as though it described every closed case.
+  const eligible = s.modes_eligible || 0;
+  const missing = Math.max(0, eligible - decided);
+  $("modeCoverage").innerHTML = eligible
+    ? `Covers <b>${decided} of ${eligible}</b> closed case${eligible === 1 ? "" : "s"}.`
+      + (missing ? ` ${missing} closed without an outgoing reply, so nobody is recorded as having resolved ${missing === 1 ? "it" : "them"}.` : "")
+    : "";
+
+  $("kAiE2E").textContent  = (s.ai_end_to_end || 0) + "%";
+  $("kHuman").textContent  = (s.human_touch_rate || 0) + "%";
+  $("sAiE2E").textContent  = decided
+    ? `of the ${decided} case${decided === 1 ? "" : "s"} with a recorded resolver`
+    : "nothing closed yet";
 
   // ---- work queue ----
   const wq = s.work_queue || {queue: [], total: 0};
@@ -1147,6 +1420,9 @@ async function load(){
   }
 
   drawChart(s.by_day);
+  renderModeChart(s.by_day);
+  renderCsat(s);
+  renderCategories(s);
   bars("riskBars", s.by_risk, ["low","medium","high"]);
   bars("sentBars", s.by_sentiment, ["positive","neutral","negative"]);
   $("avgTurns").textContent = s.avg_turns;
@@ -1227,14 +1503,19 @@ async function load(){
   }
 
   $("tableWrap").innerHTML = `<table><thead><tr>
-      <th>Case</th><th>Issue</th><th>Risk</th><th>Sentiment</th>
+      <th>Case</th><th>Issue</th><th>Intent</th><th>Risk</th><th>Sentiment</th>
+      <th>Resolved by</th>
       <th>Turns</th><th>SLA</th><th>Status</th><th>Opened</th>
     </tr></thead><tbody>${rows.map((r,i) => `
       <tr>
         <td><span class="cid">${r.id}</span>${r.is_open ? '<span class="tag">open</span>' : ''}</td>
         <td class="msg" data-i="${i}"></td>
+        <td class="itn" data-i="${i}"></td>
         <td><span class="pill ${band(r.escalation_risk)}"><i></i>${r.escalation_risk || "—"}</span></td>
-        <td><span class="pill ${tone(r.sentiment)}">${r.sentiment || "—"}</span></td>
+        <td><span class="pill ${tone(r.sentiment)}">${r.sentiment || "—"}${
+             r.emotion ? ` (${r.emotion})` : ""}</span></td>
+        <td><span class="pill ${r.resolution_mode || "unresolved"}">${
+             MODE_LABEL[r.resolution_mode] || "—"}</span></td>
         <td>${r.turns}</td>
         <td><span class="pill ${r.sla.status}" title="${slaTitle(r.sla)}">${
              slaLabel(r.sla)}</span></td>
@@ -1248,6 +1529,14 @@ async function load(){
     const row = rows[Number(td.dataset.i)];
     td.textContent = row.first_message || row.key_issue || "—";
     td.title = td.textContent;
+  });
+
+  // Intent is enum-constrained when it is written, but it reaches here as
+  // stored text, so it goes in the same way rather than through innerHTML.
+  document.querySelectorAll("td.itn").forEach(td => {
+    const row = rows[Number(td.dataset.i)];
+    td.textContent = row.intent || "—";
+    if(!row.intent) td.style.color = "var(--ink-3)";
   });
 
   // every row opens its case
@@ -1417,14 +1706,11 @@ function drawChart(days){
     const yPen = y(d.total);              // pending sits on top
     const yRes = y(d.resolved);
 
-    const label = new Date(d.day + "T00:00:00Z")
-      .toLocaleDateString(undefined, {day:"numeric", month:"short", timeZone:"UTC"});
+    const label = shortLabel(d);
 
-    // one transparent hit area per day carries the native tooltip
-    parts.push(`<g><rect class="hit" x="${(cx-slot/2).toFixed(1)}" y="${T}"
-        width="${slot.toFixed(1)}" height="${plotH}">
-        <title>${label}: ${d.total} opened — ${d.resolved} resolved, ${d.pending} pending</title>
-      </rect>`);
+    // one transparent hit area per bucket, hit-tested for the tooltip
+    parts.push(`<g><rect class="hit" data-i="${i}" x="${(cx-slot/2).toFixed(1)}"
+        y="${T}" width="${slot.toFixed(1)}" height="${plotH}"/>`);
 
     if(d.pending)  parts.push(`<rect class="bpen" x="${x.toFixed(1)}"
         y="${yPen.toFixed(1)}" width="${bw.toFixed(1)}" height="${hPen.toFixed(1)}"
@@ -1460,9 +1746,15 @@ function drawPerfChart(days){
     return;
   }
 
-  const W=620, H=200, L=30, R=12, T=14, B=28;
+  // R widened from 12 to make room for the CSAT axis on the right. The two
+  // series are on different scales -- scores are out of 10, stars out of 5 --
+  // so plotting CSAT against the left axis would show 4.5 stars sitting
+  // level with a clarity score of 4.5, which is not a comparison anyone
+  // meant to make.
+  const W=620, H=200, L=30, R=34, T=14, B=28;
   const plotW=W-L-R, plotH=H-T-B;
   const y = v => T + plotH * (1 - v/10);
+  const yStar = v => T + plotH * (1 - v/5);
   const x = i => days.length === 1
     ? L + plotW/2
     : L + (plotW * i) / (days.length - 1);
@@ -1471,6 +1763,11 @@ function drawPerfChart(days){
   [0,5,10].forEach(v => {
     parts.push(`<line class="grid" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/>`);
     parts.push(`<text x="${L-7}" y="${y(v)+3.5}" text-anchor="end">${v}</text>`);
+  });
+  // right axis, stars
+  [1,3,5].forEach(v => {
+    parts.push(`<text x="${W-R+7}" y="${yStar(v)+3.5}" text-anchor="start"
+      fill="#7C5CD6">${v}★</text>`);
   });
 
   for(const key of ["tone","empathy","clarity"]){
@@ -1488,23 +1785,53 @@ function drawPerfChart(days){
        fill="${PERF_COLOURS[key]}" stroke="#fff" stroke-width="1.6"/>`));
   }
 
+  const slot = plotW / Math.max(1, days.length);
+
+  // CSAT, drawn in SEGMENTS rather than one path. A day nobody rated is a
+  // gap, and joining across it would draw a confident line through days that
+  // have no rating in them at all.
+  let run = [];
+  const flush = () => {
+    if(run.length > 1){
+      const path = run.map(([px,py],i) =>
+        (i?"L":"M") + px.toFixed(1) + " " + py.toFixed(1)).join(" ");
+      parts.push(`<path d="${path}" fill="none" stroke="#7C5CD6" stroke-width="2"
+        stroke-dasharray="5 3" stroke-linejoin="round" stroke-linecap="round"/>`);
+    }
+    run.forEach(([px,py]) => parts.push(
+      `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3.4"
+       fill="#7C5CD6" stroke="#fff" stroke-width="1.6"/>`));
+    run = [];
+  };
   days.forEach((d,i) => {
-    const label = new Date(d.day + "T00:00:00Z")
-      .toLocaleDateString(undefined, {day:"numeric", month:"short", timeZone:"UTC"});
+    if(d.csat === null || d.csat === undefined){ flush(); return; }
+    run.push([x(i), yStar(d.csat)]);
+  });
+  flush();
+
+  days.forEach((d,i) => {
+    const label = shortLabel(d);
     // The first and last labels sit on the very edge of the plot, so centring
     // them pushes half the text outside the viewBox and it gets clipped.
     const anchor = i === 0 ? "start"
                  : i === days.length - 1 ? "end"
                  : "middle";
     parts.push(`<text x="${x(i).toFixed(1)}" y="${H-9}" text-anchor="${anchor}">${
-      label} (${d.n})</text>`);
+      label}${d.n ? ` (${d.n})` : ""}</text>`);
+
+    // One hit column per point, so the tooltip is reachable anywhere in the
+    // band rather than only on the 3.4px dot.
+    parts.push(`<rect class="hit" data-i="${i}" x="${(x(i)-slot/2).toFixed(1)}"
+      y="${T}" width="${slot.toFixed(1)}" height="${plotH}"/>`);
   });
 
   svg.innerHTML = parts.join("");
 }
 
 async function loadPerformance(){
-  const p = await (await fetch("/api/performance")).json();
+  const p = await (await fetch("/api/performance?range=" + chartRange)).json();
+  SERIES.perfChart = p.by_day || [];
+  setLoading("perfChart", false);
 
   $("perfMeta").textContent = p.scored
     ? `${p.scored} scored conversation${p.scored === 1 ? "" : "s"}` : "";
@@ -1579,20 +1906,585 @@ async function loadPerformance(){
   });
 }
 
+/* ---------------- actions: the audit trail ---------------- */
+const ACT = {q:"", action:"all", decision:"all"};
+const ACT_GROUPS = {
+  fAction:   ["all","initiate_refund","expedite_delivery","reset_account_access"],
+  fDecision: ["all","pending","approved","rejected"],
+};
+const ACT_FIELD = {fAction:"action", fDecision:"decision"};
+const ACT_SHORT = {
+  all:"all", initiate_refund:"refund", expedite_delivery:"expedite",
+  reset_account_access:"access reset",
+};
+
+function buildActChips(){
+  for(const [id, options] of Object.entries(ACT_GROUPS)){
+    $(id).innerHTML = options.map(o =>
+      `<button data-v="${o}" aria-pressed="${o === "all"}">${
+         ACT_SHORT[o] || o}</button>`).join("");
+    $(id).querySelectorAll("button").forEach(b => {
+      b.onclick = () => {
+        ACT[ACT_FIELD[id]] = b.dataset.v;
+        $(id).querySelectorAll("button").forEach(x =>
+          x.setAttribute("aria-pressed", x === b));
+        loadActions();
+      };
+    });
+  }
+}
+
+function actQuery(){
+  const p = new URLSearchParams();
+  if(ACT.q) p.set("q", ACT.q);
+  for(const k of ["action","decision"]) if(ACT[k] !== "all") p.set(k, ACT[k]);
+  const s = p.toString();
+  return s ? "?" + s : "";
+}
+
+function actFiltersActive(){
+  return ACT.q || ACT.action !== "all" || ACT.decision !== "all";
+}
+
+async function loadActions(){
+  let d;
+  try{ d = await (await fetch("/api/actions" + actQuery())).json(); }
+  catch(e){ return; }
+  if(!d || !d.ok) return;
+
+  const rows = d.actions || [];
+  const totals = d.totals || {};
+  $("actMeta").textContent = `showing ${rows.length} of ${d.matched}`;
+  badge("bActions", totals.pending || 0, "warm");
+  $("actClearAll").hidden = !actFiltersActive();
+  $("aqClear").hidden = !ACT.q;
+
+  if(!rows.length){
+    $("actTableWrap").innerHTML = `<div class="empty">
+      <div class="eico">🛡️</div>
+      <h3>${actFiltersActive() ? "Nothing matches those filters" : "No actions yet"}</h3>
+      <p>${actFiltersActive()
+           ? "Try widening the search."
+           : "When an agent ticks <b>allow actions</b>, anything the coach proposes appears here — approved or not."}</p>
+    </div>`;
+    return;
+  }
+
+  $("actTableWrap").innerHTML = `<table><thead><tr>
+      <th>When</th><th>Case</th><th>Action</th><th>Decision</th>
+      <th>Proposed by</th><th>Decided by</th><th>Reference</th>
+    </tr></thead><tbody>${rows.map((r,i) => `
+      <tr>
+        <td style="color:var(--ink-3)">${when(r.at)}</td>
+        <td><span class="cid">${r.case_id || "—"}</span></td>
+        <td class="amsg" data-i="${i}"></td>
+        <td><span class="pill ${r.decision === "approved" ? "low"
+                              : r.decision === "rejected" ? "high" : "medium"}">${
+             r.decision}</span></td>
+        <td style="color:var(--ink-2)">${r.username || "—"}</td>
+        <td style="color:var(--ink-2)">${r.decided_by || "—"}</td>
+        <td><span class="cid">${r.reference || "—"}</span></td>
+      </tr>`).join("")}</tbody></table>`;
+
+  // Plain-English description set as text, never as markup.
+  document.querySelectorAll("td.amsg").forEach(td => {
+    const row = rows[Number(td.dataset.i)];
+    td.textContent = row.description;
+    td.title = row.reason ? `${row.description} — why: ${row.reason}` : row.description;
+  });
+}
+
+function wireActions(){
+  buildActChips();
+  let t;
+  $("aq").oninput = e => {
+    ACT.q = e.target.value.trim();
+    clearTimeout(t); t = setTimeout(loadActions, 220);
+  };
+  $("aqClear").onclick = () => { $("aq").value = ""; ACT.q = ""; loadActions(); };
+  $("actClearAll").onclick = () => {
+    ACT.q = ""; ACT.action = "all"; ACT.decision = "all";
+    $("aq").value = "";
+    for(const id of Object.keys(ACT_GROUPS))
+      $(id).querySelectorAll("button").forEach(x =>
+        x.setAttribute("aria-pressed", x.dataset.v === "all"));
+    loadActions();
+  };
+  $("actCsvBtn").onclick = () => {
+    location.href = "/api/actions.csv" + actQuery();
+  };
+}
+
+/* ================= Trends: range, tooltips, exports =================
+   Everything here works on the hand-written SVG that was already in this
+   file. No chart library: the PNG export serialises the SVG we already draw
+   and paints it onto a canvas, which is a dozen lines and avoids shipping a
+   renderer to redraw what the browser has drawn already. */
+
+const RANGES = ["24h", "7d", "14d", "30d"];
+const RANGE_LABEL = {"24h":"24 hours", "7d":"7 days", "14d":"14 days", "30d":"30 days"};
+const RANGE_KEY = "sc.trendRange";
+let chartRange = "7d";
+let chartBucket = "day";
+
+function rememberRange(v){
+  try{ localStorage.setItem(RANGE_KEY, v); }catch(e){ /* private window */ }
+}
+function rememberedRange(){
+  try{
+    const v = localStorage.getItem(RANGE_KEY);
+    return RANGES.includes(v) ? v : "7d";
+  }catch(e){ return "7d"; }        // storage blocked -- fall back to the default
+}
+
+/* what each chart is currently drawing, so JSON exports exactly that */
+const SERIES = {chart: [], perfChart: []};
+
+/* ---- bucket labels ---- */
+function bucketDate(p){
+  return new Date(p.at || (p.day + "T00:00:00Z"));
+}
+// Buckets are cut in UTC on the server, and the day labels in this file were
+// already formatted in UTC to match. The hour labels do the same: rendering a
+// UTC bucket boundary in local time labels it "02:30" in IST, which names a
+// bucket that starts half an hour before the label says it does.
+const UTC_DAY = {weekday:"long", day:"numeric", month:"short", timeZone:"UTC"};
+const UTC_HOUR = {hour:"2-digit", minute:"2-digit", timeZone:"UTC", hour12:false};
+
+function shortLabel(p){
+  const d = bucketDate(p);
+  return chartBucket === "hour"
+    ? d.toLocaleTimeString([], UTC_HOUR) + " UTC"
+    : d.toLocaleDateString(undefined, {day:"numeric", month:"short", timeZone:"UTC"});
+}
+function longLabel(p){
+  const d = bucketDate(p);
+  const day = d.toLocaleDateString(undefined, UTC_DAY);
+  return chartBucket === "hour"
+    ? `${d.toLocaleTimeString([], UTC_HOUR)} UTC · ${day}`
+    : day;
+}
+
+/* ---- skeleton ---- */
+function setLoading(id, on){
+  const box = $("plot-" + id);
+  if(!box) return;
+  box.dataset.loading = on ? "true" : "false";
+  let skel = box.querySelector(".chartskel");
+  if(on && !skel){
+    skel = document.createElement("div");
+    skel.className = "chartskel";
+    box.appendChild(skel);
+  }else if(!on && skel){
+    skel.remove();
+  }
+}
+
+/* ---- tooltip ----
+   One card, shared by both charts, positioned fixed so neither the
+   horizontal scroller nor the panel's overflow can clip it. */
+const TIP = () => $("chartTip");
+
+function hideTip(){ TIP().hidden = true; }
+
+function showTip(svg, event, html){
+  const tip = TIP();
+  if(!html){ hideTip(); return; }
+  tip.innerHTML = html;
+  tip.hidden = false;
+
+  const box = svg.getBoundingClientRect();
+  const size = tip.getBoundingClientRect();
+  const pad = 12;
+
+  // Follow the pointer, but keep the whole card over the chart.
+  let left = event.clientX + 14;
+  if(left + size.width > box.right - pad) left = event.clientX - size.width - 14;
+  left = Math.max(box.left + pad, Math.min(left, box.right - size.width - pad));
+
+  let top = event.clientY - size.height - 12;
+  if(top < box.top + pad) top = event.clientY + 18;
+  top = Math.max(box.top + pad, Math.min(top, box.bottom - size.height - pad));
+
+  tip.style.left = left + "px";
+  tip.style.top = top + "px";
+}
+
+function tipRows(rows){
+  return rows.map(r => `<div class="tt-row"><i style="background:${r.colour}"></i>
+    <span class="tt-k">${r.label}</span><span class="tt-v">${r.value}</span></div>`).join("");
+}
+
+function wireTip(svg, describe){
+  const at = event => {
+    const host = event.target.closest && event.target.closest("[data-i]");
+    if(!host){ hideTip(); return; }
+    showTip(svg, event, describe(Number(host.dataset.i)));
+  };
+  // Pointer events cover mouse and touch in one path. Nothing calls
+  // preventDefault, so a finger dragged across the chart still scrolls.
+  svg.addEventListener("pointermove", at);
+  svg.addEventListener("pointerdown", at);
+  svg.addEventListener("pointerleave", hideTip);
+  svg.addEventListener("pointerup", hideTip);
+  svg.addEventListener("pointercancel", hideTip);
+}
+
+/* ---- exports ---- */
+function download(blob, name){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function stamp(){
+  return new Date().toISOString().slice(0, 10);
+}
+
+function exportJSON(id, title){
+  const payload = {
+    chart: title,
+    range: chartRange,
+    range_label: RANGE_LABEL[chartRange],
+    bucket: chartBucket,
+    exported_at: new Date().toISOString(),
+    points: SERIES[id] || [],
+  };
+  download(new Blob([JSON.stringify(payload, null, 2)],
+                    {type:"application/json"}),
+           `support-coach-${id}-${chartRange}-${stamp()}.json`);
+}
+
+/* Inline every computed paint property onto a clone.
+   A serialised SVG is a standalone document: it has no <style> block, no
+   stylesheet and no :root, so var(--green) and every class rule vanish. What
+   is not inlined here renders black. */
+const PAINT = ["fill","stroke","stroke-width","stroke-linecap","stroke-linejoin",
+               "opacity","font-family","font-size","font-weight","text-anchor"];
+
+function inlinePaint(live, clone){
+  const from = live.querySelectorAll("*");
+  const to = clone.querySelectorAll("*");
+  for(let i = 0; i < from.length; i++){
+    const computed = getComputedStyle(from[i]);
+    let css = "";
+    for(const prop of PAINT) css += `${prop}:${computed.getPropertyValue(prop)};`;
+    to[i].setAttribute("style", css);
+  }
+}
+
+function exportPNG(id, title){
+  const live = $(id);
+  const view = live.viewBox.baseVal;
+  const W = view.width, H = view.height;
+  const HEAD = 54;                      // room for the title and the range
+  const SCALE = 2;                      // readable when pasted into a slide
+
+  const clone = live.cloneNode(true);
+  inlinePaint(live, clone);
+  clone.querySelectorAll(".hit").forEach(el => el.remove());
+
+  const caption = `${RANGE_LABEL[chartRange]} · exported ${stamp()}`;
+  // A solid background, and text colours written in rather than inherited,
+  // so the image reads the same pasted onto a white deck or a dark one.
+  const doc = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H + HEAD}"
+      viewBox="0 0 ${W} ${H + HEAD}">
+    <rect x="0" y="0" width="${W}" height="${H + HEAD}" fill="#FFFFFF"/>
+    <text x="16" y="26" fill="#16181C" font-family="Inter,Helvetica,Arial,sans-serif"
+      font-size="15" font-weight="700">${title}</text>
+    <text x="16" y="44" fill="#5A6069" font-family="Inter,Helvetica,Arial,sans-serif"
+      font-size="11">${caption}</text>
+    <g transform="translate(0 ${HEAD})">${clone.innerHTML}</g>
+  </svg>`;
+
+  const image = new Image();
+  image.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = W * SCALE;
+    canvas.height = (H + HEAD) * SCALE;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if(!blob){ toast("Export failed", "The browser could not make a PNG."); return; }
+      download(blob, `support-coach-${id}-${chartRange}-${stamp()}.png`);
+    }, "image/png");
+  };
+  image.onerror = () => toast("Export failed", "The chart could not be rendered.");
+  // A data URI keeps the canvas untainted, so toBlob() is allowed to read it.
+  image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(doc);
+}
+
+const CHART_TITLES = {chart: "Cases opened per day",
+                      perfChart: "Agent scores over time"};
+
+document.addEventListener("click", e => {
+  const png = e.target.closest("[data-png]");
+  if(png) exportPNG(png.dataset.png, CHART_TITLES[png.dataset.png]);
+  const json = e.target.closest("[data-json]");
+  if(json) exportJSON(json.dataset.json, CHART_TITLES[json.dataset.json]);
+});
+
+/* ---- the toggle ---- */
+function buildRangeChips(){
+  $("fRange").innerHTML = RANGES.map(r =>
+    `<button data-v="${r}" aria-pressed="${r === chartRange}"
+       style="text-transform:none">${RANGE_LABEL[r]}</button>`).join("");
+  $("fRange").querySelectorAll("button").forEach(b => {
+    b.onclick = () => setRange(b.dataset.v);
+  });
+}
+
+async function setRange(next){
+  if(!RANGES.includes(next)) next = "7d";
+  chartRange = next;
+  rememberRange(next);
+  $("fRange").querySelectorAll("button").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.v === next));
+
+  hideTip();
+  setLoading("chart", true);
+  setLoading("perfChart", true);
+  await Promise.all([load(), loadPerformance()]);
+}
+
+/* ---------------- who closed them, over time ----------------
+   A stacked area in the same idiom as the bar chart above: hand-built SVG
+   paths, the same margins, the same gridline and label classes. No library,
+   because there isn't one in here to match. */
+function renderModeChart(days){
+  const svg = $("modeChart");
+  const has = (days || []).some(d => d.ai_autonomous + d.hybrid + d.human > 0);
+
+  if(!has){
+    svg.innerHTML = `<text x="360" y="105" text-anchor="middle"
+      style="font-size:12px;fill:var(--ink-3)">Nothing closed yet</text>`;
+    $("modeMeta").textContent = "";
+    return;
+  }
+
+  const W = 720, H = 210, L = 34, R = 10, T = 20, B = 30;
+  const plotW = W - L - R, plotH = H - T - B;
+
+  const peak = Math.max(1, ...days.map(d =>
+    d.ai_autonomous + d.hybrid + d.human));
+  const LADDER = [2,4,6,8,10,12,16,20,24,30,40,50,60,80,100,150,200,300,500];
+  const nice = LADDER.find(n => n >= peak) || Math.ceil(peak / 100) * 100;
+  const y = v => T + plotH * (1 - v / nice);
+  // One point per day, spread across the plot. A single day would divide by
+  // zero, so it sits in the middle instead of at x = NaN.
+  const x = i => days.length === 1
+    ? L + plotW / 2
+    : L + plotW * (i / (days.length - 1));
+
+  const parts = [];
+
+  [0, 0.5, 1].forEach(f => {
+    const v = Math.round(nice * f);
+    parts.push(`<line class="${f === 0 ? "zero" : "grid"}" x1="${L}" x2="${W-R}"
+      y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/>`);
+    parts.push(`<text class="ylab" x="${L-8}" y="${(y(v)+3.5).toFixed(1)}"
+      text-anchor="end">${v}</text>`);
+  });
+
+  // Stacked bottom-up: human, then hybrid on top of it, then AI on top of
+  // both, so the AI band is the one along the top edge and its growth is the
+  // shape you actually see.
+  const bands = [
+    {cls:"a-hum", key:"human"},
+    {cls:"a-hyb", key:"hybrid"},
+    {cls:"a-ai",  key:"ai_autonomous"},
+  ];
+
+  let floor = days.map(() => 0);
+  bands.forEach(band => {
+    const top = days.map((d, i) => floor[i] + d[band.key]);
+    const up = days.map((d, i) => `${x(i).toFixed(1)},${y(top[i]).toFixed(1)}`);
+    const down = days.map((d, i) => `${x(i).toFixed(1)},${y(floor[i]).toFixed(1)}`)
+                     .reverse();
+    parts.push(`<polygon class="${band.cls}" points="${
+      up.concat(down).join(" ")}"/>`);
+    floor = top;
+  });
+
+  const every = Math.max(1, Math.round(days.length / 6));
+  const slot = plotW / Math.max(1, days.length);
+
+  days.forEach((d, i) => {
+    const label = shortLabel(d);
+    const closed = d.ai_autonomous + d.hybrid + d.human;
+
+    parts.push(`<rect class="hit" x="${(x(i)-slot/2).toFixed(1)}" y="${T}"
+      width="${slot.toFixed(1)}" height="${plotH}">
+      <title>${label}: ${closed} closed — ${d.ai_autonomous} AI, ${
+        d.hybrid} hybrid, ${d.human} human</title></rect>`);
+
+    if(i % every === 0 || i === days.length - 1){
+      // The first and last points sit ON the plot edges, so a centred label
+      // there runs half outside the viewBox and gets clipped -- which is how
+      // "Sep 18" rendered as "Sep 1". Anchor the ends inward instead.
+      const anchor = i === 0 ? "start"
+                   : i === days.length - 1 ? "end" : "middle";
+      parts.push(`<text class="xlab" x="${x(i).toFixed(1)}" y="${H-10}"
+        text-anchor="${anchor}">${label}</text>`);
+    }
+  });
+
+  svg.innerHTML = parts.join("");
+
+  const totals = days.reduce((a, d) => ({
+    ai: a.ai + d.ai_autonomous, hy: a.hy + d.hybrid, hu: a.hu + d.human,
+  }), {ai:0, hy:0, hu:0});
+  const all = totals.ai + totals.hy + totals.hu;
+  $("modeMeta").textContent = all
+    ? `${Math.round(100 * totals.ai / all)}% AI over ${days.length} day${
+        days.length === 1 ? "" : "s"}`
+    : "";
+}
+
+/* ---------------- what the tooltips say ---------------- */
+function describeVolume(i){
+  const d = SERIES.chart[i];
+  if(!d) return "";
+  const rate = d.total ? Math.round(100 * d.resolved / d.total) : 0;
+  return `<div class="tt-when">${longLabel(d)}</div>`
+    + tipRows([
+        {colour:"var(--green)", label:"Resolved", value:d.resolved},
+        {colour:"var(--amber)", label:"Pending",  value:d.pending},
+      ])
+    + `<div class="tt-foot">Total: ${d.total} · Resolved rate: ${rate}%</div>`;
+}
+
+function describeScores(i){
+  const d = SERIES.perfChart[i];
+  if(!d) return "";
+  const show = v => (v === null || v === undefined) ? "—" : v.toFixed(1);
+  return `<div class="tt-when">${longLabel(d)}</div>`
+    + tipRows([
+        {colour:PERF_COLOURS.tone,    label:"Tone",    value:show(d.tone)},
+        {colour:PERF_COLOURS.empathy, label:"Empathy", value:show(d.empathy)},
+        {colour:PERF_COLOURS.clarity, label:"Clarity", value:show(d.clarity)},
+        {colour:"#7C5CD6", label:"CSAT",
+         value: d.csat === null || d.csat === undefined
+           ? "—" : `${d.csat.toFixed(2)}★ (${d.csat_n})`},
+      ])
+    + `<div class="tt-foot">Conversations scored: ${d.n}</div>`;
+}
+
+/* ---------------- satisfaction ---------------- */
+const SMALL_SAMPLE = 10;
+
+function stars(value){ return value === null || value === undefined ? "—" : value.toFixed(2); }
+
+function renderCsat(s){
+  const c = s.csat || {average:null, count:0, eligible:0, response_rate:0};
+  const tile = $("kCsat");
+
+  // The honesty rule: never a bare average on a thin sample. The count rides
+  // along and the figure is dimmed, so it reads as provisional at a glance.
+  tile.innerHTML = "";
+  tile.classList.toggle("thin", c.count > 0 && c.count < SMALL_SAMPLE);
+  if(c.average === null){
+    tile.textContent = "—";
+  }else{
+    tile.append(document.createTextNode(stars(c.average)));
+    const outof = document.createElement("span");
+    outof.className = "outof"; outof.textContent = " / 5.0";
+    tile.appendChild(outof);
+    if(c.count < SMALL_SAMPLE){
+      const samp = document.createElement("span");
+      samp.className = "samp";
+      samp.textContent = `(${c.count} rating${c.count === 1 ? "" : "s"})`;
+      tile.appendChild(samp);
+    }
+  }
+  $("sCsat").textContent = c.eligible
+    ? `${c.count} of ${c.eligible} resolved case${c.eligible === 1 ? "" : "s"} rated`
+    : "No resolved cases yet";
+
+  // ---- median first reply ----
+  const r = s.first_reply || {median_seconds:null, count:0};
+  $("kReply").textContent = r.median_seconds === null
+    ? "—" : shortDuration(r.median_seconds);
+  $("sReply").textContent = r.count
+    ? `median across ${r.count} case${r.count === 1 ? "" : "s"}`
+    : "median · no replies yet";
+
+  // ---- satisfaction by resolution mode ----
+  const rows = s.csat_by_mode || [];
+  const rated = rows.reduce((n, x) => n + x.count, 0);
+  $("csatModeMeta").textContent = rated
+    ? `${rated} rating${rated === 1 ? "" : "s"}` : "no ratings yet";
+
+  $("csatModeBars").innerHTML = rows.map(row => {
+    const width = row.average === null ? 0 : (row.average / 5) * 100;
+    const thin = row.count > 0 && row.count < SMALL_SAMPLE;
+    return `<div class="brow${thin ? " thin" : ""}">
+      <div class="k">${MODE_LABEL_LONG[row.mode] || row.mode}</div>
+      <div class="bar"><div class="fill m-${row.mode.replace("_autonomous","")}"
+           style="width:${width}%"></div></div>
+      <div class="barval">${row.average === null ? "not rated"
+        : `${stars(row.average)} ★ <span class="samp">(${row.count})</span>`}</div>
+    </div>`;
+  }).join("");
+}
+
+const MODE_LABEL_LONG = {ai_autonomous:"AI autonomous", hybrid:"Hybrid", human:"Human"};
+
+/* ---------------- volume by category ---------------- */
+function renderCategories(s){
+  const data = s.categories || {rows:[], total:0};
+  $("catMeta").textContent = data.total
+    ? `${data.total} ticket${data.total === 1 ? "" : "s"}` : "";
+
+  if(!data.rows.length){
+    $("catBars").innerHTML = `<div class="idle">Nothing logged yet.</div>`;
+    return;
+  }
+
+  const max = Math.max(1, ...data.rows.map(r => r.count));
+  $("catBars").innerHTML = data.rows.map((r,i) => `
+    <div class="brow catrow">
+      <div class="k" data-cat="${i}"></div>
+      <div class="bar"><div class="fill cat" style="width:${(r.count/max)*100}%"></div></div>
+      <div class="catval"><b>${r.count}</b> · ${r.share}%</div>
+    </div>`).join("");
+
+  // Category names come from stored data, so they go in as text.
+  document.querySelectorAll("[data-cat]").forEach(el => {
+    const row = data.rows[Number(el.dataset.cat)];
+    el.textContent = row.category;
+    el.title = `${row.category} — ${row.count} of ${data.total}`;
+  });
+}
+
 /* ---------------- search + filters ---------------- */
-const FILTERS = {q:"", status:"all", risk:"all", sentiment:"all"};
+const MODE_LABEL = {
+  ai_autonomous: "AI", hybrid: "Hybrid", human: "Human",
+};
+const MODE_CHIP = {
+  all: "all", ai_autonomous: "AI", hybrid: "hybrid", human: "human",
+};
+
+const FILTERS = {q:"", status:"all", risk:"all", sentiment:"all", mode:"all"};
 const GROUPS = {
   fStatus:    ["all","pending","resolved","auto_resolved"],
   fRisk:      ["all","low","medium","high"],
   fSentiment: ["all","positive","neutral","negative"],
+  fMode:      ["all","ai_autonomous","hybrid","human"],
 };
-const FIELD = {fStatus:"status", fRisk:"risk", fSentiment:"sentiment"};
+const FIELD = {fStatus:"status", fRisk:"risk", fSentiment:"sentiment",
+               fMode:"mode"};
 
 function buildChips(){
   for(const [id, options] of Object.entries(GROUPS)){
     $(id).innerHTML = options.map(o =>
       `<button data-v="${o}" aria-pressed="${o === "all"}">${
-         o === "auto_resolved" ? "auto" : o}</button>`).join("");
+         id === "fMode" ? MODE_CHIP[o]
+         : o === "auto_resolved" ? "auto" : o}</button>`).join("");
     $(id).querySelectorAll("button").forEach(b => {
       b.onclick = () => {
         FILTERS[FIELD[id]] = b.dataset.v;
@@ -1606,13 +2498,14 @@ function buildChips(){
 
 function filtersActive(){
   return FILTERS.q || FILTERS.status !== "all"
-      || FILTERS.risk !== "all" || FILTERS.sentiment !== "all";
+      || FILTERS.risk !== "all" || FILTERS.sentiment !== "all"
+      || FILTERS.mode !== "all";
 }
 
 function queryString(){
   const p = new URLSearchParams();
   if(FILTERS.q) p.set("q", FILTERS.q);
-  for(const k of ["status","risk","sentiment"])
+  for(const k of ["status","risk","sentiment","mode"])
     if(FILTERS[k] !== "all") p.set(k, FILTERS[k]);
   return p;
 }
@@ -1628,7 +2521,8 @@ $("qClear").onclick = () => {
   $("q").value = ""; FILTERS.q = ""; $("qClear").hidden = true; load();
 };
 $("clearAll").onclick = () => {
-  Object.assign(FILTERS, {q:"", status:"all", risk:"all", sentiment:"all"});
+  Object.assign(FILTERS, {q:"", status:"all", risk:"all", sentiment:"all",
+                          mode:"all"});
   $("q").value = ""; $("qClear").hidden = true;
   buildChips();
   load();
@@ -1818,6 +2712,16 @@ function renderCase(k){
 
 $("refreshBtn").onclick = () => { load(); loadPerformance(); loadUsage(); };
 buildChips();
+wireActions();
+
+chartRange = rememberedRange();
+buildRangeChips();
+wireTip($("chart"), describeVolume);
+wireTip($("perfChart"), describeScores);
+// Shown from the first paint, so the panels never resize under the cursor
+// when the first response lands.
+setLoading("chart", true);
+setLoading("perfChart", true);
 showView(location.hash.slice(1) || remembered() || DEFAULT_VIEW);
 loadMe();                  // role decides which controls exist
 load();
@@ -1826,5 +2730,6 @@ loadUsage();
 setInterval(load, 15000);   // keep the numbers live while it sits on a screen
 setInterval(loadUsage, 30000);
 </script>
+<div class="charttip" id="chartTip" hidden></div>
 </body>
 </html>
