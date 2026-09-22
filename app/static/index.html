@@ -102,7 +102,7 @@ body{
 .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
 
 /* ---------------- layout ---------------- */
-.shell{flex:1;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(400px,.8fr);
+.shell{flex:1;display:grid;grid-template-columns:280px minmax(0,1fr) 380px;
   gap:18px;padding:18px 20px 0;overflow:hidden}
 .col{display:flex;flex-direction:column;min-height:0}
 .rail{overflow-y:auto;padding-bottom:22px;display:flex;flex-direction:column;gap:14px}
@@ -145,9 +145,28 @@ body{
 .shield.low{background:var(--green-bg)} .shield.medium{background:var(--amber-bg)}
 .shield.high{background:var(--red-bg)}
 
-.duo{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:16px}
-.mini{border:1px solid var(--line);border-radius:12px;padding:11px 13px;
-  background:var(--surface-2)}
+/* ---------------- extracted intent ---------------- */
+.intent{border:1px solid var(--line);border-radius:12px;padding:12px 13px;
+  background:var(--surface-2);margin-top:16px}
+.ihead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.ihead .k{font-size:10px;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3)}
+.iconf{font-size:11px;color:var(--ink-3);font-family:var(--mono);flex:0 0 auto}
+.ival{font-size:19px;font-weight:800;letter-spacing:-.02em;line-height:1.2;
+  margin-top:7px;color:var(--ink)}
+.ival.none{color:var(--ink-3);font-weight:700}
+.isub{font-size:12.5px;color:var(--ink-2);margin-top:4px;line-height:1.45}
+.isub.idle{color:var(--ink-3)}
+
+/* three across now that emotion sits beside sentiment. minmax(0,...) lets a
+   column shrink below its content, so a long word ellipses instead of
+   pushing the rail out of shape on a narrow screen. */
+.duo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;
+  margin-top:16px}
+.mini{border:1px solid var(--line);border-radius:12px;padding:11px;
+  background:var(--surface-2);min-width:0}
+.duo .pill{max-width:100%;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
 .mini .k{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
   color:var(--ink-3);margin-bottom:7px}
 
@@ -264,6 +283,28 @@ textarea::placeholder{color:var(--ink-3)}
 .rate button.down[aria-pressed="true"]{border-color:var(--red);background:var(--red-bg)}
 .rate button.up[aria-pressed="true"]{border-color:var(--green);background:var(--green-bg)}
 
+/* ---------------- proposed actions: the human gate ---------------- */
+.panel.gate{border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-bg)}
+.panel.gate .phead{background:var(--amber-bg);border-bottom-color:var(--amber)}
+.panel.gate .ptitle{color:var(--amber)}
+.prop{border:1px solid var(--line);border-radius:12px;padding:12px 13px;
+  background:var(--surface-2)}
+.prop + .prop{margin-top:10px}
+.propwhat{font-size:14px;font-weight:750;color:var(--ink);line-height:1.35}
+.propwhy{font-size:12px;color:var(--ink-2);margin-top:5px;line-height:1.45}
+.propmeta{font-size:10.5px;color:var(--ink-3);font-family:var(--mono);margin-top:6px}
+.propact{display:flex;gap:8px;margin-top:11px}
+.propact .btn{flex:1;justify-content:center}
+.prop.done{border-color:var(--green);background:var(--green-bg)}
+.prop.done .propwhat{color:var(--green)}
+.prop.no{border-color:var(--line);background:var(--surface-3);opacity:.85}
+.prop.no .propwhat{color:var(--ink-3);text-decoration:line-through}
+.prop.failed{border-color:var(--red);background:var(--red-bg)}
+.prop.failed .propwhat{color:var(--red)}
+.gatestate{font-size:11px;font-family:var(--mono);padding:3px 8px;border-radius:999px;
+  background:var(--surface-3);color:var(--ink-3);white-space:nowrap}
+.gatestate.armed{background:var(--amber-bg);color:var(--amber)}
+
 .approve{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-3);
   font-weight:600;cursor:pointer;user-select:none}
 .approve input{accent-color:var(--brand);width:15px;height:15px;cursor:pointer}
@@ -299,6 +340,49 @@ textarea::placeholder{color:var(--ink-3)}
 .vstat .dot3 i:nth-child(2){animation-delay:.15s}
 .vstat .dot3 i:nth-child(3){animation-delay:.3s}
 @keyframes vbounce{0%,60%,100%{opacity:.3}30%{opacity:1}}
+
+/* ---- interim dictation, shown grey inside the box ----
+   A textarea cannot colour part of its own value, so a mirror sits exactly
+   over it: same font, same padding, same line-height. While dictating the
+   textarea's own text goes transparent (the caret does not) and the mirror
+   is what you read. */
+.inputwrap{position:relative;flex:1;display:flex}
+.inputwrap textarea{flex:1}
+.ghost{position:absolute;inset:0;padding:11px 14px;border:1px solid transparent;
+  border-radius:12px;font-family:var(--sans);font-size:13.5px;line-height:1.55;
+  white-space:pre-wrap;overflow-wrap:break-word;overflow:hidden;
+  pointer-events:none;color:var(--ink);z-index:1}
+.ghost .interim{color:var(--ink-3)}
+.inputwrap[data-dictating="true"] textarea{color:transparent;caret-color:var(--brand)}
+
+/* ---- "check this transcript" ---- */
+.lowconf{display:flex;align-items:center;gap:7px;margin-top:8px;padding:7px 11px;
+  border-radius:10px;background:var(--amber-bg);color:var(--amber);
+  font-size:11.5px;font-weight:600}
+.lowconf .ico{font-size:13px}
+
+/* ---- speak a reply ---- */
+.play{display:inline-flex;align-items:center;gap:6px}
+.play.on{background:var(--brand-bg);border-color:var(--brand);color:var(--brand)}
+.bubble .speak{margin-top:7px;height:24px;padding:0 9px;font-size:10.5px;
+  border-radius:7px;border:1px solid var(--line-2);background:var(--surface);
+  color:var(--ink-2);cursor:pointer;font-family:var(--sans);font-weight:700}
+.bubble .speak:hover{border-color:var(--brand);color:var(--brand)}
+.bubble .speak.on{background:var(--brand);border-color:var(--brand);color:#fff}
+
+/* ---- how the message arrived ---- */
+.viacon{display:inline-flex;align-items:center;gap:4px;margin-left:6px;
+  font-size:10px;color:var(--ink-3);vertical-align:middle}
+
+/* ---- the master switch ---- */
+.vtoggle{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;
+  border-radius:10px;border:1px solid var(--line-2);background:var(--surface);
+  color:var(--ink-2);font-size:12px;font-weight:650;cursor:pointer;
+  font-family:var(--sans);transition:.15s}
+.vtoggle:hover{border-color:var(--brand);color:var(--brand)}
+.vtoggle[aria-pressed="false"]{opacity:.62}
+.vtoggle[aria-pressed="false"] .vdot{background:var(--ink-3)}
+.vdot{width:7px;height:7px;border-radius:50%;background:var(--green);display:block}
 
 .kbd{font-family:var(--mono);font-size:10.5px;background:var(--surface-3);
   border:1px solid var(--line-2);border-bottom-width:2px;border-radius:5px;
@@ -342,9 +426,67 @@ textarea::placeholder{color:var(--ink-3)}
 .toast.ok b{color:var(--green)}
 .toast span{color:var(--ink-2);word-break:break-word}
 
-@media (max-width:1020px){
-  .shell{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto;overflow:auto}
-}
+/* ---------------- escalated queue ---------------- */
+.queue{min-width:0;display:flex;flex-direction:column}
+.qcount{display:inline-grid;place-items:center;min-width:19px;height:19px;padding:0 6px;
+  border-radius:999px;background:var(--brand);color:#fff;font-size:10.5px;
+  font-weight:800;letter-spacing:0;font-family:var(--mono)}
+.qcount.calm{background:var(--surface-3);color:var(--ink-3)}
+.qtools{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;flex:0 0 auto}
+.qsearch input{width:100%;height:32px;padding:0 10px 0 28px;border-radius:9px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink);
+  font-family:var(--sans);font-size:12px;outline:none;transition:.15s}
+.qsearch{position:relative}
+.qsearch .mag{position:absolute;left:9px;top:7px;font-size:12px;opacity:.5}
+.qsearch input:focus{border-color:#F0A88F;box-shadow:0 0 0 3px rgba(239,78,43,.1)}
+
+/* Chip group, matching the dashboard's filter chips. The console had no
+   .chips rule of its own -- the class only existed in dashboard.html. */
+.chips{display:inline-flex;gap:4px;background:var(--surface-3);
+  border:1px solid var(--line);border-radius:9px;padding:3px}
+.chips button{height:24px;padding:0 10px;border:0;border-radius:6px;
+  background:transparent;color:var(--ink-3);font-size:11px;font-weight:700;
+  cursor:pointer;font-family:var(--sans);transition:.15s}
+.chips button:hover{color:var(--ink)}
+.chips button[aria-pressed="true"]{background:var(--surface);color:var(--brand);
+  box-shadow:var(--sh-1)}
+
+.qlist{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;
+  gap:8px;padding-bottom:12px}
+.qlist::-webkit-scrollbar{width:10px}
+.qlist::-webkit-scrollbar-thumb{background:#DFDCD4;border-radius:10px;
+  border:3px solid var(--bg)}
+.qcard{border:1px solid var(--line);border-radius:13px;background:var(--surface);
+  padding:10px 11px;cursor:pointer;transition:.14s;box-shadow:var(--sh-1);
+  text-align:left;font-family:var(--sans);width:100%;display:block}
+.qcard:hover{border-color:#F0A88F;transform:translateY(-1px)}
+.qcard[aria-current="true"]{border-color:var(--brand);background:var(--brand-bg);
+  box-shadow:0 0 0 3px rgba(239,78,43,.11)}
+.qcard[data-cursor="true"]{outline:2px solid var(--brand);outline-offset:2px}
+.qtop{display:flex;align-items:center;gap:7px}
+.qid{font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--ink)}
+.qmsg{font-size:12px;color:var(--ink-2);line-height:1.45;margin-top:6px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;word-break:break-word}
+.qmsg.idle{color:var(--ink-3);font-style:italic}
+.qfoot{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  margin-top:8px;font-size:10.5px;color:var(--ink-3);font-family:var(--mono)}
+.qempty{border:1px dashed var(--line-2);border-radius:13px;padding:18px 14px;
+  text-align:center;color:var(--ink-3);font-size:12px;line-height:1.6}
+.qhint{flex:0 0 auto;padding:10px 2px 14px;border-top:1px solid var(--line);
+  font-size:10.5px;color:var(--ink-3);line-height:1.8}
+
+.qbtn{display:none;align-items:center;gap:7px}
+.qscrim{position:fixed;inset:0;background:rgba(22,24,28,.34);z-index:69;
+  animation:fade .18s ease-out}
+@keyframes fade{from{opacity:0}}
+.colswitch{display:none;background:var(--surface-3);border:1px solid var(--line);
+  border-radius:9px;padding:2px;gap:2px}
+.colswitch button{height:26px;padding:0 10px;border:0;border-radius:6px;
+  background:transparent;color:var(--ink-3);font-size:11px;font-weight:700;
+  cursor:pointer;font-family:var(--sans);transition:.15s}
+.colswitch button[aria-pressed="true"]{background:var(--surface);color:var(--brand);
+  box-shadow:var(--sh-1)}
 
 /* ---------- signed-in user ---------- */
 .me{display:flex;align-items:center;gap:9px;padding:4px 5px 4px 4px;
@@ -358,6 +500,41 @@ textarea::placeholder{color:var(--ink-3)}
 .me .out{width:26px;height:26px;border:0;border-radius:50%;background:transparent;
   color:var(--ink-3);cursor:pointer;font-size:13px;line-height:1;transition:.15s}
 .me .out:hover{background:var(--surface-3);color:var(--brand)}
+
+/* ---------- responsive: must stay last ---------- */
+/* Under 1100 the queue becomes a drawer rather than squeezing three columns
+   into a laptop width; under 700 there is only room for one column at a time. */
+@media (max-width:1100px){
+  .shell{grid-template-columns:minmax(0,1fr) 380px}
+  .qbtn{display:inline-flex}
+  .queue{position:fixed;top:0;left:0;bottom:0;width:min(310px,86vw);z-index:70;
+    background:var(--surface);border-right:1px solid var(--line);
+    padding:16px 14px 12px;transform:translateX(-102%);
+    transition:transform .22s cubic-bezier(.2,.9,.3,1);
+    box-shadow:14px 0 40px -14px rgba(16,24,40,.24)}
+  .queue[data-open="true"]{transform:none}
+}
+@media (max-width:820px){
+  .shell{grid-template-columns:minmax(0,1fr) 320px}
+}
+@media (max-width:700px){
+  .shell{grid-template-columns:1fr}
+  .colswitch{display:inline-flex}
+  /* The header was already tight before the queue button and the column
+     switcher joined it; at this width the row has to wrap or the whole
+     document scrolls sideways and the new one-column layout is unusable. */
+  .appbar{flex-wrap:wrap;gap:9px;padding:10px 14px}
+  .appbar .stats{order:3;width:100%}
+  /* The quick-pick row is its own horizontal scroller by design, but without
+     a width to scroll WITHIN it grows to its content and takes the page with
+     it. Only at this width; the wide layout is untouched. */
+  .dock{padding-left:14px;padding-right:14px}
+  .dockcard,#quickWrap{min-width:0;max-width:100%}
+  .quick{width:100%}     /* a definite width, so it scrolls WITHIN itself */
+  .dock{overflow-x:hidden}
+  .shell[data-show="chat"] .col.intel{display:none}
+  .shell[data-show="intel"] .col.chat{display:none}
+}
 </style>
 </head>
 <body>
@@ -390,18 +567,49 @@ textarea::placeholder{color:var(--ink-3)}
     </span>
     <button class="out" id="signOut" title="Sign out">⏻</button>
   </div>
+  <button class="btn qbtn" id="queueBtn" aria-expanded="false"
+          title="Open the escalated queue">Queue
+    <span class="qcount calm" id="qBtnCount">0</span></button>
+  <span class="colswitch" id="colSwitch" role="group" aria-label="Which column to show">
+    <button data-col="queue" aria-pressed="false">Queue</button>
+    <button data-col="chat" aria-pressed="true">Chat</button>
+    <button data-col="intel" aria-pressed="false">Intel</button>
+  </span>
+  <button class="vtoggle" id="voiceToggle" aria-pressed="true"
+          title="Turn every voice control off — for presenting somewhere noisy">
+    <span class="vdot"></span>Voice</button>
   <button class="btn" id="seedBtn">Load demo</button>
   <button class="btn" id="newBtn">New case</button>
   <button class="btn brand" id="resolveBtn">Resolve</button>
 </div>
 
-<div class="shell">
-  <div class="col">
+<div class="shell" id="shell" data-show="chat">
+  <aside class="col queue" id="queueCol" data-open="false"
+         aria-label="Escalated queue">
+    <div class="slab">Escalated queue
+      <span class="qcount calm" id="qCount" aria-label="cases needing action">0</span>
+    </div>
+    <div class="qtools">
+      <label class="qsearch">
+        <span class="mag">🔍</span>
+        <input id="qSearch" type="search" autocomplete="off"
+               placeholder="Search case or message…" aria-label="Search the queue">
+      </label>
+      <span class="chips" id="qChips" role="group" aria-label="Filter by risk"></span>
+    </div>
+    <div class="qlist" id="qList" role="listbox" aria-label="Cases waiting"></div>
+    <div class="qhint">
+      <span class="kbd">j</span> <span class="kbd">k</span> to move ·
+      <span class="kbd">↵</span> to open
+    </div>
+  </aside>
+
+  <div class="col chat">
     <div class="slab">Conversation</div>
     <div class="stream" id="stream"></div>
   </div>
 
-  <div class="col">
+  <div class="col intel">
     <div class="slab">Live intelligence</div>
     <div class="rail">
 
@@ -414,13 +622,31 @@ textarea::placeholder{color:var(--ink-3)}
               <div class="herosub" id="riskSub">Send a customer message to begin.</div>
             </div>
           </div>
+          <div class="intent">
+            <div class="ihead">
+              <div class="k">Extracted intent</div>
+              <div class="iconf" id="mIntentConf" hidden></div>
+            </div>
+            <div class="ival none" id="mIntent">—</div>
+            <div class="isub idle" id="mIntentSub">Nothing detected yet.</div>
+          </div>
           <div class="duo">
             <div class="mini"><div class="k">Sentiment</div>
               <span class="pill none" id="mSent">—</span></div>
+            <div class="mini"><div class="k">Emotion</div>
+              <span class="pill none" id="mEmo">—</span></div>
             <div class="mini"><div class="k">Urgency</div>
               <span class="pill none" id="mUrg">—</span></div>
           </div>
         </div>
+      </div>
+
+      <div class="panel gate" id="actionsPanel" hidden>
+        <div class="phead">
+          <span class="ptitle">Proposed actions</span>
+          <span class="pmeta" id="actionsMeta"></span>
+        </div>
+        <div class="pbody" id="actionsList"></div>
       </div>
 
       <div class="panel" id="callPanel" hidden>
@@ -465,6 +691,8 @@ textarea::placeholder{color:var(--ink-3)}
             <button class="down" id="rateDown" aria-pressed="false"
                     title="Not useful">👎</button>
           </span>
+          <button class="btn play" id="speakBtn" data-voice-control
+                  data-speak="suggestion" aria-pressed="false" hidden>▶ Play</button>
           <button class="btn" id="copyBtn">Copy</button>
           <button class="btn brand" id="useBtn">Use this reply</button>
         </div>
@@ -487,9 +715,11 @@ textarea::placeholder{color:var(--ink-3)}
       </div>
       <span class="cost" id="costHint">analyses, looks up and drafts a reply</span>
       <label class="approve" data-needs="allow_writes" hidden
-             title="Let the coach actually carry out refunds and resets">
+             title="Lets the coach PROPOSE refunds, expedites and access resets. It can never carry one out -- every proposal waits for you to approve it.">
         <input type="checkbox" id="allowWrites"> allow actions
       </label>
+      <span class="gatestate" id="gateState" data-needs="allow_writes" hidden
+            >model cannot request actions</span>
       <span class="lang" id="langPick" hidden role="group" aria-label="Speech language">
         <button data-lang="en-IN" aria-pressed="true" title="Indian English">EN</button>
         <button data-lang="hi-IN" aria-pressed="false" title="Hindi">हिं</button>
@@ -502,10 +732,16 @@ textarea::placeholder{color:var(--ink-3)}
         &nbsp;·&nbsp; <span class="kbd">tab</span> switch</span>
     </div>
     <div class="inputrow">
-      <textarea id="input" rows="1" placeholder="Type what the customer just said…"></textarea>
+      <div class="inputwrap" id="inputWrap">
+        <div class="ghost" id="ghost" aria-hidden="true" hidden></div>
+        <textarea id="input" rows="1" placeholder="Type what the customer just said…"></textarea>
+      </div>
       <button class="mic" id="micBtn" aria-pressed="false" title="Speak instead of typing"
               aria-label="Speak instead of typing">🎤</button>
       <button class="btn brand" id="sendBtn" style="height:42px;padding:0 22px">Send</button>
+    </div>
+    <div class="lowconf" id="lowConf" hidden>
+      <span class="ico">⚠️</span><span>check this transcript</span>
     </div>
   </div>
 </div>
@@ -569,6 +805,12 @@ const band = v => ["low","medium","high"].includes(v) ? v : "none";
 // sentiment uses its own words, so it needs its own mapping -- running it
 // through band() painted every sentiment grey.
 const tone = v => ["positive","neutral","negative"].includes(v) ? v : "none";
+// Emotions borrow the three pill colours rather than introducing a fourth
+// palette: calm/satisfied read green, confused/anxious amber, the two angry
+// ones red. Anything unrecognised stays grey.
+const MOOD = {Calm:"positive", Satisfied:"positive", Confused:"neutral",
+              Anxious:"neutral", Frustrated:"negative", Angry:"negative"};
+const mood = v => MOOD[v] || "none";
 
 function toast(title, message){
   const el = document.createElement("div");
@@ -588,8 +830,12 @@ function setBusy(on){
 }
 
 /* ---------------- render ---------------- */
+let lastHistory = [];
+
 function renderStream(history){
   const box = $("stream");
+  lastHistory = history || [];
+  history = lastHistory;
   if(!history.length){
     box.innerHTML = `<div class="empty">
       <div class="ico">💬</div>
@@ -602,12 +848,130 @@ function renderStream(history){
   }
   box.innerHTML = history.map(m => `
     <div class="turn ${m.speaker}">
-      <div class="who">${m.speaker}</div>
+      <div class="who">${m.speaker}${m.channel === "voice"
+        ? '<span class="viacon" title="Dictated, not typed">🎙 voice</span>' : ""}</div>
       <div class="bubble"></div>
     </div>`).join("");
-  [...box.querySelectorAll(".bubble")].forEach((b,i) => b.textContent = history[i].text);
+
+  [...box.querySelectorAll(".bubble")].forEach((b,i) => {
+    // textContent first, and the button appended after -- assigning text
+    // would wipe any child element.
+    b.textContent = history[i].text;
+
+    // Anything the coach composed can be read aloud. A message a person
+    // typed does not get a Play button: they know what they wrote.
+    if(voiceOn && Speech && history[i].source === "ai" && history[i].text){
+      const play = document.createElement("button");
+      play.className = "speak";
+      play.dataset.speak = "msg-" + i;
+      play.dataset.text = history[i].text;
+      play.dataset.compact = "1";
+      play.setAttribute("aria-pressed", "false");
+      play.title = "Read this reply aloud";
+      play.textContent = "▶";
+      b.appendChild(play);
+    }
+  });
+  paintSpeakButtons();
   box.scrollTop = box.scrollHeight;
 }
+
+const ACTION_VERB = {
+  initiate_refund: "Refund initiated",
+  expedite_delivery: "Delivery expedited",
+  reset_account_access: "Access reset sent",
+};
+
+function clockOf(stamp){
+  if(!stamp) return "";
+  const d = new Date(stamp);
+  return isNaN(d) ? "" : d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+}
+
+function renderActions(list){
+  const panel = $("actionsPanel"), body = $("actionsList"), meta = $("actionsMeta");
+  const rows = list || [];
+  panel.hidden = rows.length === 0;
+  if(!rows.length) return;
+
+  const waiting = rows.filter(r => r.decision === "pending").length;
+  meta.textContent = waiting ? `${waiting} awaiting your approval` : "all decided";
+  panel.classList.toggle("gate", waiting > 0);
+
+  body.innerHTML = rows.map(r => {
+    if(r.decision === "pending"){
+      return `<div class="prop">
+        <div class="propwhat" data-text="${r.id}"></div>
+        <div class="propwhy" data-why="${r.id}"></div>
+        <div class="propmeta">proposed ${clockOf(r.at)} · nothing has changed yet</div>
+        <div class="propact">
+          <button class="btn brand" data-decide="approved" data-id="${r.id}">Approve and run</button>
+          <button class="btn" data-decide="rejected" data-id="${r.id}">Reject</button>
+        </div></div>`;
+    }
+    if(r.decision === "rejected"){
+      return `<div class="prop no">
+        <div class="propwhat" data-text="${r.id}"></div>
+        <div class="propmeta">rejected by ${r.decided_by || "—"} at ${clockOf(r.decided_at)}</div>
+      </div>`;
+    }
+    const failed = r.result && r.result.error;
+    return `<div class="prop ${failed ? "failed" : "done"}">
+      <div class="propwhat" data-done="${r.id}"></div>
+      <div class="propmeta" data-err="${r.id}"></div>
+    </div>`;
+  }).join("");
+
+  // Text set separately -- an order id or a model-written reason must never
+  // be able to inject markup into the panel an agent approves things from.
+  rows.forEach(r => {
+    const what = body.querySelector(`[data-text="${r.id}"]`);
+    if(what) what.textContent = r.description;
+    const why = body.querySelector(`[data-why="${r.id}"]`);
+    if(why){
+      why.textContent = r.reason ? `Why: ${r.reason}` : "";
+      why.hidden = !r.reason;
+    }
+    const done = body.querySelector(`[data-done="${r.id}"]`);
+    if(done){
+      const verb = ACTION_VERB[r.action] || r.label || r.action;
+      done.textContent = (r.result && r.result.error)
+        ? `${verb} failed`
+        : `${verb} · ${r.reference || "—"} · by ${r.decided_by || "—"} at ${clockOf(r.decided_at)}`;
+    }
+    const err = body.querySelector(`[data-err="${r.id}"]`);
+    if(err) err.textContent = (r.result && r.result.error) ? r.result.error : r.description;
+  });
+}
+
+async function decide(id, decision){
+  const buttons = [...document.querySelectorAll(`[data-id="${id}"]`)];
+  buttons.forEach(b => b.disabled = true);
+  try{
+    const reply = await fetch(`/api/actions/${id}/decide`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({decision}),
+    });
+    const d = await reply.json();
+    if(!d.ok){
+      toast("Not done", d.error || "That action could not be decided.");
+      buttons.forEach(b => b.disabled = false);
+      return;
+    }
+    const done = d.action;
+    toast(decision === "approved" ? "Action run" : "Action rejected",
+          done.reference ? `${done.description} · ${done.reference}` : done.description);
+    if(d.state) renderIntel(d.state);
+  }catch(e){
+    toast("Not done", "Could not reach the server.");
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+document.addEventListener("click", e => {
+  const button = e.target.closest("[data-decide]");
+  if(button) decide(button.dataset.id, button.dataset.decide);
+});
 
 function renderIntel(s){
   const risk = s.escalation_risk, b = band(risk);
@@ -621,16 +985,36 @@ function renderIntel(s){
   $("shield").className = "shield " + b;
   $("shield").textContent = SHIELD[risk] || "🛡️";
 
-  const sent = $("mSent"), urg = $("mUrg");
+  const sent = $("mSent"), urg = $("mUrg"), emo = $("mEmo");
   sent.className = "pill " + tone(s.sentiment);
   sent.textContent = s.sentiment && s.sentiment !== "unknown" ? s.sentiment : "—";
   urg.className = "pill " + band(s.urgency);
   urg.textContent = s.urgency && s.urgency !== "unknown" ? s.urgency : "—";
+  emo.className = "pill " + mood(s.emotion);
+  emo.textContent = s.emotion || "—";
+  emo.title = s.emotion || "";
+
+  // Extracted intent. The sub-line reuses the key issue, so the card says
+  // what the customer wants AND the specific thing behind it.
+  const intent = $("mIntent"), isub = $("mIntentSub"), conf = $("mIntentConf");
+  intent.textContent = s.intent || "—";
+  intent.className = "ival" + (s.intent ? "" : " none");
+  isub.textContent = s.key_issue || "Nothing detected yet.";
+  isub.className = "isub" + (s.key_issue ? "" : " idle");
+
+  // A missing confidence hides the label outright -- showing "undefined", or
+  // a 0 the model never reported, would both be worse than showing nothing.
+  const c = s.intent_confidence;
+  const hasConf = typeof c === "number" && isFinite(c);
+  conf.hidden = !hasConf;
+  if(hasConf) conf.textContent = `${Math.round(c)}% conf.`;
 
   const issue = $("keyIssue");
   issue.textContent = s.key_issue || "Nothing detected yet.";
   issue.className = s.key_issue ? "" : "idle";
 
+  renderActions(s.actions);
+  paintGateState(s.allow_writes);
   $("callChip").textContent = s.calls;
   $("caseChip").textContent = s.case_id || "—";
   renderCalls(s.facts);
@@ -706,7 +1090,11 @@ function renderScores(f, ms){
     row("Clarity", f.clarity_score) +
     `<div class="tipbox"><b>Coaching tip</b><span></span></div>`;
   $("scoreBody").querySelector(".tipbox span").textContent = f.coaching_tip;
-  $("scoreMeta").textContent = ms + " ms";
+  // A draft score rates the reply the coach wrote, not one the agent sent.
+  // Saying so is the difference between a useful preview and a wrong number.
+  $("scoreMeta").textContent = f.scored === "draft"
+    ? "scoring the suggested reply"
+    : (ms ? ms + " ms" : "");
 }
 
 function showSkeletons(){
@@ -743,8 +1131,13 @@ async function send(text, who){
   try{
     const res = await fetch("/api/" + who, {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({text})
+      body: JSON.stringify(Object.assign(
+        {text, channel: spokeThisMessage ? "voice" : "typed"},
+        who === "agent" ? {used_suggestion: usedSuggestion} : {}))
     });
+    usedSuggestion = false;          // one send, one claim
+    spokeThisMessage = false;
+    $("lowConf").hidden = true;
     const data = await res.json();
     if(!data.ok){
       toast("Request failed", data.error);
@@ -787,6 +1180,9 @@ async function send(text, who){
   }finally{
     setBusy(false);
     $("input").focus();
+    // Every send can change the queue: a new case appears, risk moves, or a
+    // reply stops the SLA clock and reorders things.
+    loadQueue();
   }
 }
 
@@ -808,6 +1204,14 @@ const input = $("input");
 input.addEventListener("input", () => {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 140) + "px";
+  // Cleared the box after taking the draft? Then they are not using it, and
+  // whatever they type next is theirs.
+  if(!input.value.trim()){
+    usedSuggestion = false;
+    spokeThisMessage = false;
+    lowConfidence = false;
+    $("lowConf").hidden = true;
+  }
 });
 input.addEventListener("keydown", e => {
   if(e.key === "Enter" && (e.metaKey || e.ctrlKey)){ e.preventDefault(); fire(); }
@@ -822,9 +1226,16 @@ function fire(){
 }
 $("sendBtn").onclick = fire;
 
+// Set when the agent takes the draft, sent with the message and cleared
+// after. The server also compares the text against the draft, so an agent
+// who copies it by hand still lands on hybrid -- this just makes the case
+// where they pressed the button exact rather than inferred.
+let usedSuggestion = false;
+
 $("useBtn").onclick = () => {
   setSpeaker("agent");
   input.value = $("suggestion").textContent;
+  usedSuggestion = true;
   input.focus(); input.dispatchEvent(new Event("input"));
 };
 async function rate(verdict){
@@ -861,17 +1272,39 @@ $("newBtn").onclick = async () => {
   const d = await (await fetch("/api/reset", {method:"POST"})).json();
   renderStream(d.state.history); renderIntel(d.state); resetAgentPanels();
   $("latChip").textContent = "—"; $("trackPanel").hidden = true;
+  qOpen = null;
+  loadQueue();
 };
 
+function paintGateState(armed, offered){
+  const chip = $("gateState");
+  if(!chip) return;
+  chip.classList.toggle("armed", !!armed);
+  chip.textContent = armed
+    ? `may propose ${offered && offered.length ? offered.length : 3} actions · you approve each`
+    : "model cannot request actions";
+}
+
 $("allowWrites").onchange = async e => {
-  await fetch("/api/allow-writes", {
+  const reply = await fetch("/api/allow-writes", {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({allow: e.target.checked})
   });
-  toast_ok(e.target.checked ? "Actions enabled" : "Actions disabled",
-    e.target.checked
-      ? "Refunds and password resets will now be carried out for real."
-      : "Refunds and resets will be requested but left for a person to approve.");
+  const d = await reply.json().catch(() => ({}));
+
+  if(!d.ok){
+    e.target.checked = !e.target.checked;     // put the box back
+    toast("Not allowed", d.error || "Your role cannot arm write actions.");
+    return;
+  }
+
+  paintGateState(d.allow_writes, d.offered);
+  // This copy used to say refunds "will now be carried out for real", which
+  // was never true and is the opposite of what the control does.
+  toast_ok(d.allow_writes ? "Actions can be proposed" : "Actions withheld",
+    d.allow_writes
+      ? "The coach may now PROPOSE a refund, expedite or access reset. Nothing runs until you approve it."
+      : "The write tools are no longer sent to the model, so it cannot ask for one.");
 };
 
 $("resolveBtn").onclick = async () => {
@@ -881,6 +1314,8 @@ $("resolveBtn").onclick = async () => {
   renderStream(d.state.history); renderIntel(d.state); resetAgentPanels();
   $("latChip").textContent = "—"; $("trackPanel").hidden = true;
   $("callPanel").hidden = true;
+  qOpen = null;
+  loadQueue();          // the case just left the queue
 };
 
 // a green variant of the toast, for things that went right
@@ -903,6 +1338,80 @@ $("seedBtn").onclick = async () => {
   setSpeaker("customer");
 };
 
+/* ---------------- speaking a reply ----------------
+ * speechSynthesis is in the browser already, so this costs nothing and sends
+ * nothing anywhere. Only one utterance is ever in flight: two replies read
+ * over each other is worse than silence.
+ */
+const Speech = window.speechSynthesis || null;
+let speakingId = null;
+
+function voicesFor(){
+  try{ return Speech ? Speech.getVoices() : []; }catch(e){ return []; }
+}
+
+// Devanagari in the text beats the toggle: the coach can answer a Hindi
+// question in Hindi while the input toggle is still on English.
+function langOf(text){
+  return /[ऀ-ॿ]/.test(text || "") ? "hi-IN" : voiceLang;
+}
+
+function pickVoice(lang){
+  const all = voicesFor();
+  if(!all.length) return null;            // let the browser choose its default
+  const root = lang.split("-")[0];
+  return all.find(v => v.lang && v.lang.replace("_","-") === lang)
+      || all.find(v => v.lang && v.lang.replace("_","-").startsWith(root + "-"))
+      || all.find(v => v.lang && v.lang.startsWith(root))
+      || null;
+}
+
+function stopSpeaking(){
+  if(Speech){ try{ Speech.cancel(); }catch(e){} }
+  speakingId = null;
+  paintSpeakButtons();
+}
+
+function paintSpeakButtons(){
+  document.querySelectorAll("[data-speak]").forEach(b => {
+    const on = b.dataset.speak === speakingId;
+    b.classList.toggle("on", on);
+    b.textContent = on ? "■ Stop" : (b.dataset.compact ? "▶" : "▶ Play");
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function speak(id, text){
+  if(!Speech || !text) return;
+  if(speakingId === id){ stopSpeaking(); return; }   // pressing Stop
+
+  stopSpeaking();                                    // only one at a time
+  const utterance = new SpeechSynthesisUtterance(text);
+  const lang = langOf(text);
+  utterance.lang = lang;
+  const chosen = pickVoice(lang);
+  if(chosen) utterance.voice = chosen;               // otherwise the default
+  utterance.onend = () => { if(speakingId === id) stopSpeaking(); };
+  utterance.onerror = () => { if(speakingId === id) stopSpeaking(); };
+
+  speakingId = id;
+  paintSpeakButtons();
+  try{ Speech.speak(utterance); }
+  catch(e){ stopSpeaking(); toast("Cannot play", "This browser refused to speak."); }
+}
+
+// Voices load asynchronously in Chrome; without this the first Play can land
+// on an empty list and fall back to the default when a Hindi voice exists.
+if(Speech && typeof Speech.onvoiceschanged !== "undefined"){
+  Speech.onvoiceschanged = () => {};
+}
+
+document.addEventListener("click", e => {
+  const button = e.target.closest("[data-speak]");
+  if(!button) return;
+  speak(button.dataset.speak, button.dataset.text || $("suggestion").textContent);
+});
+
 /* ---------------- voice input ---------------- */
 /*
  * Uses the browser's own speech recognition, so there is no extra library and
@@ -918,14 +1427,41 @@ let voiceLang = "en-IN";
 
 // Called on every result. Kept as a named function so it can be exercised
 // without a microphone.
+const LOW_CONFIDENCE = 0.6;
+let lowConfidence = false, spokeThisMessage = false;
+
+function paintGhost(settled, interim){
+  const ghost = $("ghost");
+  ghost.textContent = settled;
+  if(interim){
+    const span = document.createElement("span");
+    span.className = "interim";
+    span.textContent = interim;
+    ghost.appendChild(span);
+  }
+  ghost.scrollTop = input.scrollTop;
+}
+
 function handleSpeech(finalText, interimText){
-  const spoken = (finalText + interimText).trim();
   const base = voiceBase.trimEnd();
+  const settledSpoken = finalText.trim();
+  const heard = interimText.trim();
+
   // Only join with a space when there is actually something on both sides --
   // otherwise a silent moment kept appending a trailing space to what the
   // agent had already typed, once per interim result.
-  input.value = base && spoken ? base + " " + spoken : (base || spoken);
+  const settled = base && settledSpoken ? base + " " + settledSpoken
+                                        : (base || settledSpoken);
+  const interim = heard ? (settled ? " " : "") + heard : "";
+
+  // The textarea always holds everything, interim included, so stopping
+  // mid-phrase never loses words. The ghost is what makes the unconfirmed
+  // part LOOK unconfirmed.
+  input.value = settled + interim;
   input.dispatchEvent(new Event("input"));
+  paintGhost(settled, interim);
+
+  if(settledSpoken || heard) spokeThisMessage = true;
 }
 
 function setListening(on){
@@ -934,6 +1470,14 @@ function setListening(on){
   $("vstat").hidden = !on;
   $("micBtn").textContent = on ? "⏹" : "🎤";
   $("micBtn").title = on ? "Stop listening" : "Speak instead of typing";
+
+  $("inputWrap").dataset.dictating = on ? "true" : "false";
+  $("ghost").hidden = !on;
+  if(!on){
+    // Everything in the box is now settled text the agent can edit.
+    $("ghost").textContent = "";
+    $("lowConf").hidden = !lowConfidence;
+  }
 }
 
 function stopVoice(){
@@ -951,14 +1495,26 @@ function startVoice(){
   voice.interimResults = true;    // show words as they are recognised
 
   voiceBase = input.value;        // keep anything already typed
+  lowConfidence = false;
+  $("lowConf").hidden = true;
   let finalText = "";
 
   voice.onresult = event => {
     let interim = "";
     for(let i = event.resultIndex; i < event.results.length; i++){
-      const chunk = event.results[i][0].transcript;
-      if(event.results[i].isFinal) finalText += chunk;
-      else interim += chunk;
+      const guess = event.results[i][0];
+      if(event.results[i].isFinal){
+        finalText += guess.transcript;
+        // Chrome reports 0 for results it has not scored. Warning on that
+        // would put the notice under every transcript, which teaches people
+        // to ignore it.
+        if(typeof guess.confidence === "number"
+           && guess.confidence > 0 && guess.confidence < LOW_CONFIDENCE){
+          lowConfidence = true;
+        }
+      }else{
+        interim += guess.transcript;
+      }
     }
     handleSpeech(finalText, interim);
 
@@ -1003,13 +1559,280 @@ $("langPick").querySelectorAll("button").forEach(b => {
   };
 });
 
-// Feature detection: show the controls only where they actually work.
-if(SpeechRec){
-  $("langPick").hidden = false;
-} else {
-  $("micBtn").hidden = true;
-  $("langPick").hidden = true;
+// Feature detection. The button stays PUT and goes disabled rather than
+// vanishing: a control that disappears reads as a bug, a disabled one with a
+// reason reads as an answer.
+if(!SpeechRec){
+  const mic = $("micBtn");
+  mic.disabled = true;
+  mic.title = "This browser cannot do speech recognition. Chrome, Edge or Safari can.";
+  mic.setAttribute("aria-label", mic.title);
 }
+
+/* ---------------- the master switch ----------------
+   One toggle that puts every voice control away, for presenting somewhere
+   noisy. It also stops anything currently listening or speaking. */
+let voiceOn = true;
+
+function rememberVoice(v){
+  try{ localStorage.setItem("sc.voice", v ? "1" : "0"); }catch(e){}
+}
+function rememberedVoice(){
+  try{ return localStorage.getItem("sc.voice") !== "0"; }catch(e){ return true; }
+}
+
+function applyVoiceMode(){
+  $("voiceToggle").setAttribute("aria-pressed", voiceOn ? "true" : "false");
+  $("voiceToggle").title = voiceOn
+    ? "Turn every voice control off — for presenting somewhere noisy"
+    : "Voice is off. Click to bring the controls back.";
+
+  $("micBtn").hidden = !voiceOn;
+  $("langPick").hidden = !voiceOn || !SpeechRec;
+  // Visibility depends on the switch alone. #speakBtn lives inside the
+  // suggestion footer, so that footer already hides it when there is nothing
+  // to play -- tying it to both meant it stayed hidden after the footer came
+  // back, because nothing re-ran this.
+  document.querySelectorAll("[data-voice-control]").forEach(el => {
+    el.hidden = !voiceOn;
+  });
+
+  if(!voiceOn){
+    stopVoice();
+    stopSpeaking();
+    $("lowConf").hidden = true;
+    $("vstat").hidden = true;
+  }
+  renderStream(lastHistory);      // repaint the per-message controls
+}
+
+$("voiceToggle").onclick = () => {
+  voiceOn = !voiceOn;
+  rememberVoice(voiceOn);
+  applyVoiceMode();
+};
+
+/* ================= escalated queue =================
+ * The ORDER comes from the server -- /api/queue returns work_queue(), the
+ * same function the dashboard's queue uses. Nothing here re-sorts: this
+ * filters and draws what it was handed.
+ */
+let QUEUE = [], qFilter = "all", qQuery = "", qCursor = -1, qOpen = null;
+
+// "Critical" is not a value this app stores -- escalation risk is low /
+// medium / high. It is defined here as high risk that is ALSO past its
+// first-reply target or close to it: the ones actually on fire rather than
+// merely serious. Critical is therefore a subset of High.
+const Q_FILTERS = {
+  all:      () => true,
+  critical: row => row.escalation_risk === "high"
+                && ["breached", "at_risk"].includes((row.sla || {}).status),
+  high:     row => row.escalation_risk === "high",
+};
+
+function waited(seconds){
+  if(!seconds || seconds < 0) return "just now";
+  const m = Math.round(seconds / 60);
+  if(m < 60) return `${m}m waiting`;
+  const h = Math.floor(m / 60);
+  if(h < 24) return `${h}h ${m % 60}m waiting`;
+  return `${Math.floor(h / 24)}d ${h % 24}h waiting`;
+}
+
+function visibleQueue(){
+  const keep = Q_FILTERS[qFilter] || Q_FILTERS.all;
+  const needle = qQuery.trim().toLowerCase();
+  return QUEUE.filter(row => {
+    if(!keep(row)) return false;
+    if(!needle) return true;
+    return `${row.id} ${row.first_message} ${row.key_issue}`
+      .toLowerCase().includes(needle);
+  });
+}
+
+function renderQueue(){
+  const rows = visibleQueue();
+  const list = $("qList");
+
+  // The badge counts everything waiting, not the filtered view -- it is the
+  // size of the backlog, and it should not drop because somebody typed in
+  // the search box.
+  const total = QUEUE.length;
+  [$("qCount"), $("qBtnCount")].forEach(el => {
+    el.textContent = total;
+    el.classList.toggle("calm", total === 0);
+  });
+
+  if(!rows.length){
+    list.innerHTML = `<div class="qempty">${
+      total ? "Nothing matches that filter." : "Nothing waiting. Enjoy it."}</div>`;
+    qCursor = -1;
+    return;
+  }
+
+  list.innerHTML = rows.map((row, i) => `
+    <button class="qcard" type="button" role="option" data-id="${row.id}"
+            data-i="${i}" aria-current="${row.id === qOpen}">
+      <div class="qtop">
+        <span class="qid">${row.id}</span>
+        <span class="pill ${["low","medium","high"].includes(row.escalation_risk)
+          ? row.escalation_risk : "none"}"><i></i>${row.escalation_risk || "—"}</span>
+      </div>
+      <div class="qmsg${row.first_message ? "" : " idle"}" data-msg="${i}"></div>
+      <div class="qfoot"><span>Risk: ${row.frustration || 0}</span>
+        <span>${waited(row.age_seconds)}</span></div>
+    </button>`).join("");
+
+  // A customer's own words go in as text, never as markup.
+  list.querySelectorAll("[data-msg]").forEach(el => {
+    const row = rows[Number(el.dataset.msg)];
+    el.textContent = row.first_message || row.key_issue || "No message yet";
+    el.title = el.textContent;
+  });
+
+  paintCursor();
+}
+
+function paintCursor(){
+  $("qList").querySelectorAll(".qcard").forEach((card, i) =>
+    card.setAttribute("data-cursor", i === qCursor));
+}
+
+function moveCursor(step){
+  const cards = $("qList").querySelectorAll(".qcard");
+  if(!cards.length) return;
+  qCursor = qCursor < 0
+    ? (step > 0 ? 0 : cards.length - 1)
+    : Math.max(0, Math.min(cards.length - 1, qCursor + step));
+  paintCursor();
+  cards[qCursor].scrollIntoView({block:"nearest"});
+}
+
+async function loadQueue(){
+  try{
+    const d = await (await fetch("/api/queue?limit=50")).json();
+    if(!d || !d.ok) return;
+    QUEUE = d.queue || [];
+    qOpen = d.open_case || null;
+    renderQueue();
+  }catch(e){ /* a queue that cannot refresh must not break the console */ }
+}
+
+// Fill the suggestion and scorecard panels from a case's own stored work.
+// Without this, opening a case cleared both panels even when the case had a
+// draft, because resetAgentPanels() runs on every open.
+function showCaseWork(state){
+  if(!state) return;
+
+  if(state.last_suggestion){
+    const s = $("suggestion");
+    s.className = "replybox";
+    s.textContent = state.last_suggestion;
+    $("sugFoot").hidden = false;
+    const last = (state.ratings || []).slice(-1)[0];
+    showRating(last ? last.rating : null);
+  }
+  if(state.last_feedback){
+    renderScores(state.last_feedback, state.last_latency_ms || 0);
+  }
+}
+
+async function openFromQueue(id){
+  if(!id) return;
+  try{
+    const d = await (await fetch("/api/open-case", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id})
+    })).json();
+
+    if(!d.ok){ toast("Could not open case", d.error || id); return; }
+
+    // Repaint in place. No reload -- the whole point of the column.
+    renderStream(d.state.history);
+    renderIntel(d.state);
+    resetAgentPanels();
+    showCaseWork(d.state);
+    qOpen = id;
+    renderQueue();
+    closeDrawer();
+    if(window.matchMedia("(max-width:700px)").matches) showColumn("chat");
+    toast_ok("Case opened", `${id} loaded.`);
+  }catch(err){ toast("Could not open case", String(err)); }
+}
+
+$("qList").addEventListener("click", e => {
+  const card = e.target.closest(".qcard");
+  if(card) openFromQueue(card.dataset.id);
+});
+
+$("qSearch").addEventListener("input", e => {
+  qQuery = e.target.value;
+  qCursor = -1;
+  renderQueue();
+});
+
+function buildQueueChips(){
+  const labels = {all:"All", critical:"Critical", high:"High"};
+  $("qChips").innerHTML = Object.keys(labels).map(key =>
+    `<button data-v="${key}" aria-pressed="${key === qFilter}"
+      style="text-transform:none">${labels[key]}</button>`).join("");
+  $("qChips").querySelectorAll("button").forEach(b => {
+    b.onclick = () => {
+      qFilter = b.dataset.v;
+      qCursor = -1;
+      $("qChips").querySelectorAll("button").forEach(x =>
+        x.setAttribute("aria-pressed", x === b));
+      renderQueue();
+    };
+  });
+}
+
+/* ---- drawer, under 1100px ---- */
+function openDrawer(){
+  $("queueCol").dataset.open = "true";
+  $("queueBtn").setAttribute("aria-expanded", "true");
+  if(!$("qScrim")){
+    const scrim = document.createElement("div");
+    scrim.className = "qscrim"; scrim.id = "qScrim";
+    scrim.onclick = closeDrawer;
+    document.body.appendChild(scrim);
+  }
+}
+function closeDrawer(){
+  $("queueCol").dataset.open = "false";
+  $("queueBtn").setAttribute("aria-expanded", "false");
+  const scrim = $("qScrim");
+  if(scrim) scrim.remove();
+}
+$("queueBtn").onclick = () =>
+  $("queueCol").dataset.open === "true" ? closeDrawer() : openDrawer();
+
+/* ---- one column at a time, under 700px ---- */
+function showColumn(which){
+  if(which === "queue"){ openDrawer(); which = $("shell").dataset.show || "chat"; }
+  $("shell").dataset.show = which;
+  $("colSwitch").querySelectorAll("button").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.col === which));
+}
+$("colSwitch").querySelectorAll("button").forEach(b => {
+  b.onclick = () => showColumn(b.dataset.col);
+});
+
+/* ---- j / k / Enter ---- */
+document.addEventListener("keydown", e => {
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  const el = document.activeElement;
+  if(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
+
+  if(e.key === "j"){ e.preventDefault(); moveCursor(1); }
+  else if(e.key === "k"){ e.preventDefault(); moveCursor(-1); }
+  else if(e.key === "Enter" && qCursor >= 0){
+    const card = $("qList").querySelectorAll(".qcard")[qCursor];
+    if(card){ e.preventDefault(); openFromQueue(card.dataset.id); }
+  }else if(e.key === "Escape"){
+    closeDrawer();
+  }
+});
 
 /* ---------------- quick picks ---------------- */
 let FAQS = [];
@@ -1038,6 +1861,12 @@ function useFaq(faq){
 }
 
 /* ---------------- boot ---------------- */
+voiceOn = rememberedVoice();
+applyVoiceMode();
+
+buildQueueChips();
+loadQueue();
+
 (async () => {
   await loadMe();          // role decides which controls exist
 
@@ -1074,16 +1903,10 @@ function useFaq(faq){
 
   const s = await (await fetch("/api/state")).json();
   renderStream(s.state.history); renderIntel(s.state);
-  if(s.state.last_feedback){
-    renderScores(s.state.last_feedback, s.state.last_latency_ms || 0);
-    // keep the header consistent with the restored panels
-    if(s.state.last_latency_ms) $("latChip").textContent = s.state.last_latency_ms + " ms";
-    const sug = $("suggestion");
-    sug.className = "replybox"; sug.textContent = s.state.last_suggestion || "";
-    $("sugFoot").hidden = !s.state.last_suggestion;
-    const last = (s.state.ratings || []).slice(-1)[0];
-    showRating(last ? last.rating : null);
-  }
+  // Restore both panels independently. This used to be gated on
+  // last_feedback, so a case that had a draft but no score showed neither.
+  showCaseWork(s.state);
+  if(s.state.last_latency_ms) $("latChip").textContent = s.state.last_latency_ms + " ms";
   input.focus();
 })();
 </script>
