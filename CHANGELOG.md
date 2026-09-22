@@ -7,7 +7,84 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The work queue is in the console**, as a third column: search, All / Critical / High
+  filters, click-to-open with no page reload, the open case shown selected, and `j` / `k` /
+  `Enter` to move and open. It refreshes after every send and every resolve. The ordering is
+  `work_queue()`'s — the same function the dashboard uses — served through a new
+  `/api/queue` that an agent can reach, since `/api/stats` is lead-only.
+  Three columns above 1100px, a drawer below it, and one column with a tab switcher below
+  700px.
+
 ### Fixed
+
+- **The console header scrolled the page sideways on a phone.** It had no layout below
+  1020px at all; at 640px the row was 1278px wide. It now wraps, and the quick-pick strip
+  scrolls within itself instead of dragging the document with it.
+
+- **Customer satisfaction.** `csat_score`, `csat_comment` and `csat_at` on the case, with a
+  rating API that accepts one rating per resolved case and keeps it editable for 24 hours.
+  The dashboard gains a **CSAT** tile (average out of 5 with the response rate), an
+  **Avg first reply** tile (median, labelled as such), a CSAT line on the scores chart
+  against its own 1–5 axis, **Satisfaction by who resolved it** as three bars, and a
+  **Volume by category** panel driven by intent and falling back to the matched help
+  article. Any average over fewer than 10 ratings is shown faintly with its sample size
+  rather than hidden or presented as settled.
+  The collection UI is not built: it belongs on `/portal`, which does not exist yet.
+
+- **Voice in both directions, on browser APIs only.** Dictation now shows interim words grey
+  inside the message box and firms them up as they settle; every AI-composed reply gets a
+  Play button backed by `speechSynthesis`, picking a voice by the message's own script so a
+  Hindi reply is read by a Hindi voice. A **Voice** switch in the header puts every voice
+  control away for presenting somewhere noisy, and a low-confidence transcript is flagged
+  "check this transcript" rather than sent silently.
+- **Messages record how they arrived** — dictated or typed — and the transcript shows a small
+  mic on the dictated ones. Voice is an input method: the text goes down exactly the same
+  pipeline either way.
+
+### Changed
+
+- **An unsupported browser now disables the mic instead of hiding it**, with a tooltip saying
+  which browsers can do it. A control that vanishes reads as a bug; a disabled one with a
+  reason reads as an answer.
+
+- **Trends is interactive.** A 24h / 7d / 14d / 30d range toggle above the charts, remembered
+  in `localStorage` and defaulting to 7 days; hover and touch tooltips carrying every series
+  value plus a derived line; PNG and JSON export per chart. The 24-hour view buckets by hour,
+  because a day split into days is one or two bars. Still hand-written SVG — the PNG export
+  serialises the chart onto a canvas rather than shipping a rendering library.
+
+- **Resolution mode on every case** — `ai_autonomous`, `hybrid` or `human`, derived from
+  who composed each outgoing message rather than typed in anywhere. Messages now carry a
+  `source`, set when they are sent; older cases were backfilled on first boot by the same
+  rules, so the live value and the historical one mean the same thing.
+- **Dashboard: who resolved what.** A three-way split under Resolution progress with counts
+  and shares, "AI handled end to end" and "Human touch rate" beside it, a *Resolved by*
+  column and filter on Cases, and a stacked area on Trends showing the three modes over
+  time — hand-drawn SVG, matching the existing charts.
+
+- **Write actions, behind a human gate.** `initiate_refund`, `expedite_delivery` and
+  `reset_account_access` replace `issue_refund` and `send_password_reset`. The model can
+  propose one; only a person clicking **Approve and run** executes one.
+- **An Actions audit trail**, on the dashboard beside Cases, with the same search, filters
+  and CSV export. Every proposal and every decision is recorded — including the refused
+  ones — with the case, who proposed, who decided and when.
+
+### Changed
+
+- **`allow actions` now withholds the tools rather than declining to run them.** With the
+  box unticked the write declarations are no longer sent to the Gemini API at all, so the
+  model has no function to call.
+
+### Fixed
+
+- **Ticking `allow actions` used to let the model execute writes with no human step.**
+  `gather_facts()` ran any write tool directly once `allow_writes` was set, so a refund
+  could be issued without anyone clicking anything. The loop now records a proposal and
+  never executes a write, whatever that flag says. The checkbox's tooltip and toast, which
+  both said refunds "will now be carried out for real", described that behaviour accurately
+  and have been rewritten.
 
 - **The function-calling loop could never chain two lookups.** Function results were sent back
   with `role="tool"`, which the Gemini API rejects outright (`Role 'tool' is not supported`).

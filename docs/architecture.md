@@ -69,8 +69,12 @@ A customer message arriving at `POST /api/customer`:
      ├─► 3. AICoach.gather_facts(msg, history)
      │         function-calling loop, up to 3 rounds:
      │           model names a function ─► we run it ─► hand the result back ─► repeat
-     │         writes (issue_refund, send_password_reset) are recorded, NOT run,
-     │         unless allow_writes is on
+     │         allow_writes decides which DECLARATIONS are sent, nothing more:
+     │           off -> the 3 write tools are not offered to the model at all
+     │           on  -> they are offered, and a call to one is recorded as a
+     │                  PROPOSAL. The loop never executes a write.
+     │         a proposal becomes a change only via POST /api/actions/<id>/decide,
+     │         which is the one place a write tool is ever called.
      │
      ├─► 4. find_kb_article(msg)    embeddings + cosine, keyword fallback
      │
@@ -157,7 +161,7 @@ Vanilla JavaScript and inline SVG — no framework, no build step, no `node_modu
 | File | What it is |
 |---|---|
 | `app/static/index.html` | The live console the agent works in |
-| `app/static/dashboard.html` | Ten panels, work queue first, plus the case detail drawer |
+| `app/static/dashboard.html` | Eight sections (Overview, Work queue, Breaching soon, Cases, Trends, Knowledge, Actions, Cost), plus the case detail drawer |
 
 Charts are drawn as inline SVG in the page's own style rather than pulled from a charting
 library, which keeps the whole front end two files a contributor can read end to end.

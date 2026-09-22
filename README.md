@@ -68,9 +68,18 @@ As a conversation happens, every customer turn is analysed and every agent turn 
 
 <img src="docs/images/dashboard.png" alt="The dashboard work queue" width="100%">
 
-Work queue (riskiest and oldest first) · deflection rate · SLA breaches · issues over day ·
-agent performance over time · suggestion acceptance · and **"questions we cannot answer"** —
-the list of help articles someone still needs to write.
+**Eight sections**, reachable with keys <kbd>1</kbd>–<kbd>8</kbd>:
+
+| # | Section | What it shows |
+|---|---|---|
+| 1 | **Overview** | Totals, resolution progress, who resolved what, CSAT, median first reply, volume by category |
+| 2 | **Work queue** | Open cases, riskiest first then oldest |
+| 3 | **Breaching soon** | First-reply targets by risk — 15 min / 1 h / 4 h — and the on-time rate |
+| 4 | **Cases** | Every conversation, searchable across the full transcript, with CSV and JSON export |
+| 5 | **Trends** | Volume per day, agent scores and CSAT over time, who is closing cases, with a range toggle and PNG export |
+| 6 | **Knowledge** | Common issues, and **"questions we cannot answer"** — the help articles someone still needs to write |
+| 7 | **Actions** | The audit trail of every proposed write action and who approved or refused it |
+| 8 | **Cost** | Tokens and spend against the daily cap, by step and by conversation |
 
 ---
 
@@ -317,8 +326,12 @@ what each role can and cannot reach, and the token metering and its ceilings.
 - `gemini_api_key.txt`, `app/cases.db` and `orders.json` are git-ignored — they hold secrets,
   password hashes or real transcripts. The repo ships `.example` files instead.
 - Customer text is redacted before it reaches Gemini, on both the chat and embeddings paths.
-- Write-capable tools never fire on their own: `issue_refund` and `send_password_reset` are
-  recorded as *requested* and wait for a human.
+- Write-capable tools never fire on their own. `initiate_refund`, `expedite_delivery` and
+  `reset_account_access` are *proposed* and wait for a person to click **Approve and run**.
+  Two mechanisms back that up: with **allow actions** off the write declarations are never
+  sent to the API at all, and the function-calling loop refuses to execute a write even when
+  they are. Every proposal and every decision is recorded in the **Actions** audit trail,
+  including the ones nobody approved.
 - CI greps every commit for API-key patterns and fails if one appears.
 
 Found a problem? See **[SECURITY.md](SECURITY.md)**.
