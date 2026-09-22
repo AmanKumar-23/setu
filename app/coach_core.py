@@ -222,6 +222,21 @@ class Message:
     """Represents one message in the conversation."""
     speaker: str
     text: str
+    # Who actually composed this. Only meaningful on an outgoing (agent)
+    # message, and it is the whole basis of the resolution mode: without it
+    # a deflection and a hand-typed reply are both just speaker="agent".
+    #
+    #   human   a person wrote it
+    #   hybrid  a person sent the coach's draft, as offered or edited
+    #   ai      the coach sent it with nobody in the loop
+    source: str = "human"
+    # HOW the text got here, which is a different question from who composed
+    # it: an agent can dictate their own words, and the coach's draft can be
+    # sent by a person who never touched the keyboard.
+    #
+    #   typed   somebody typed it
+    #   voice   somebody dictated it
+    channel: str = "typed"
 
 
 @dataclass
@@ -234,13 +249,23 @@ class ConversationState:
     frustration: int = 0          # 0-100, judged across the whole conversation
     trend: str = "unknown"        # rising / falling / flat
     key_issue: str = ""
+    # Added with intent extraction. These default to empty rather than to
+    # "Other"/"Calm" on purpose: a conversation nobody has analysed yet has
+    # no reading, and claiming one would be the same class of mistake as the
+    # sentiment model calling "bahut ganda service hai" positive.
+    intent: str = ""
+    intent_confidence: Optional[int] = None   # 0-100, or None when not given
+    emotion: str = ""
 
-    def add_message(self, speaker: str, text: str):
+    def add_message(self, speaker: str, text: str, source: str = "human",
+                    channel: str = "typed"):
         """Add a new message to the conversation history."""
         self.history.append(
             Message(
                 speaker=speaker,
-                text=text
+                text=text,
+                source=source,
+                channel=channel
             )
         )
 
@@ -524,6 +549,20 @@ def knowledge_gap_detector(customer_message):
 # "description" entries do real work: the model reads the descriptions, and
 # the enums make the sentiment/urgency/trend values self-validating.
 
+# The intent and emotion vocabularies.
+#
+# Defined once and used three times over: in the schema the API enforces, in
+# the prompt the model reads, and in the validation below. Three hand-copied
+# lists drift the moment somebody adds a category to one of them, and the
+# failure is silent -- the model returns a word the panel cannot paint.
+INTENTS = [
+    "Recharge failed", "Refund status", "Order & delivery", "Network issue",
+    "Account & login", "Billing dispute", "Cancellation", "Product question",
+    "Other",
+]
+
+EMOTIONS = ["Calm", "Confused", "Frustrated", "Angry", "Anxious", "Satisfied"]
+
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -551,9 +590,22 @@ ANALYSIS_SCHEMA = {
             "type": "string",
             "description": "Short description of the customer's main problem.",
         },
+        "intent": {
+            "type": "string", "enum": INTENTS,
+            "description": "What the customer is trying to get done.",
+        },
+        "intent_confidence": {
+            "type": "integer",
+            "description": "How sure you are of the intent, from 0 to 100.",
+        },
+        "emotion": {
+            "type": "string", "enum": EMOTIONS,
+            "description": "The customer's dominant emotion in their last message.",
+        },
     },
     "required": ["sentiment", "urgency", "escalation_risk",
-                 "frustration", "trend", "key_issue"],
+                 "frustration", "trend", "key_issue",
+                 "intent", "intent_confidence", "emotion"],
 }
 
 SCORECARD_SCHEMA = {
@@ -776,8 +828,23 @@ def check_refund_status(order_id=None, refund_id=None):
     return {"refunds": refunds} if refunds else {"error": "No refunds on file."}
 
 
-def issue_refund(order_id, reason="Requested by customer"):
-    """Raise a refund against an order. THIS CHANGES DATA."""
+def _next_reference(existing, prefix, start):
+    """First free PREFIX-n reference, so a demo run produces RF-9013 rather
+    than a number that depends on how many rows happen to be in the file."""
+    used = {str(r).upper() for r in existing}
+    n = start
+    while f"{prefix}-{n}" in used:
+        n += 1
+    return f"{prefix}-{n}"
+
+
+def initiate_refund(order_id, amount=None, reason="Requested by customer"):
+    """Raise a refund against an order. THIS CHANGES DATA.
+
+    The model never reaches this function. gather_facts() records a PROPOSAL
+    when the model asks for it; the proposal runs only once a person has
+    clicked Approve, and the click is what calls this.
+    """
     data = load_orders()
     orders = data.get("orders", [])
 
@@ -792,40 +859,112 @@ def issue_refund(order_id, reason="Requested by customer"):
         return {"error": "A refund already exists for this order.",
                 "refund": existing}
 
-    today = datetime.now()
+    # A partial refund is legitimate; a refund larger than the order is not,
+    # and neither is a negative one. Both are refused here rather than in the
+    # UI, because this function is the last thing between a click and the data.
+    try:
+        value = int(order["amount"] if amount in (None, "") else amount)
+    except (TypeError, ValueError):
+        return {"error": f"{amount!r} is not a usable refund amount."}
+
+    if not 0 < value <= int(order["amount"]):
+        return {"error": f"A refund must be between 1 and the order total "
+                         f"({order['amount']})."}
+
+    now = datetime.now()
     refund = {
-        "refund_id": f"RF-{9000 + len(data.get('refunds', [])) + 13}",
+        "refund_id": _next_reference(
+            [r["refund_id"] for r in data.get("refunds", [])], "RF", 9013),
         "order_id": order["order_id"],
-        "amount": order["amount"],
+        "amount": value,
         "currency": order.get("currency", "INR"),
         "status": "processing",
-        "initiated_on": today.strftime("%Y-%m-%d"),
-        "expected_by": (today + timedelta(days=5)).strftime("%Y-%m-%d"),
+        "initiated_on": now.strftime("%Y-%m-%d"),
+        "expected_by": (now + timedelta(days=5)).strftime("%Y-%m-%d"),
         "method": "original payment method",
         "reason": reason,
     }
     data.setdefault("refunds", []).append(refund)
     save_orders(data)
-    return refund
+    return {
+        "action": "initiate_refund",
+        "reference": refund["refund_id"],
+        "at": now.isoformat(timespec="seconds"),
+        "summary": (f"Refund initiated for {refund['currency']} {value} "
+                    f"on {order['order_id']}"),
+        "refund": refund,
+    }
 
 
-def send_password_reset(email=None):
-    """Send a password reset link. THIS CHANGES DATA."""
+def expedite_delivery(order_id):
+    """Move an order to the fastest available service. THIS CHANGES DATA."""
+    data = load_orders()
+    order = next((o for o in data.get("orders", [])
+                  if o["order_id"].lower() == str(order_id).lower()), None)
+
+    if order is None:
+        return {"error": f"No order {order_id} exists on this account."}
+    if str(order.get("status", "")).lower() == "delivered":
+        return {"error": "That order has already been delivered."}
+    if order.get("expedited"):
+        return {"error": "That order has already been expedited.",
+                "expedited": order["expedited"]}
+
+    now = datetime.now()
+    reference = _next_reference(
+        [e["reference"] for e in data.get("expedites", [])], "EX", 2001)
+    expected_on = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    order["expedited"] = {"reference": reference,
+                          "at": now.isoformat(timespec="seconds")}
+    order["expected_on"] = expected_on
+    data.setdefault("expedites", []).append({
+        "reference": reference, "order_id": order["order_id"],
+        "at": now.isoformat(timespec="seconds"), "expected_on": expected_on,
+    })
+    save_orders(data)
+    return {
+        "action": "expedite_delivery",
+        "reference": reference,
+        "at": now.isoformat(timespec="seconds"),
+        "summary": (f"Delivery expedited on {order['order_id']}, "
+                    f"now expected {expected_on}"),
+        "order_id": order["order_id"],
+        "expected_on": expected_on,
+    }
+
+
+def reset_account_access(customer_id=None):
+    """Send the customer a fresh sign-in link. THIS CHANGES DATA."""
     data = load_orders()
     account = data.get("account", {})
 
     if not account:
         return {"error": "The account system is unavailable."}
 
-    if email and email.lower() != account.get("email", "").lower():
-        return {"error": "That email is not on this account."}
+    known = str(account.get("customer_id") or "")
+    if customer_id and known and str(customer_id).lower() != known.lower():
+        return {"error": f"{customer_id} is not the customer on this account."}
 
-    stamp = datetime.now().isoformat(timespec="seconds")
-    account["password_reset_sent_at"] = stamp
+    now = datetime.now()
+    reference = _next_reference(
+        [r["reference"] for r in data.get("access_resets", [])], "AR", 3001)
+
+    account["password_reset_sent_at"] = now.isoformat(timespec="seconds")
     data["account"] = account
+    data.setdefault("access_resets", []).append({
+        "reference": reference, "customer_id": known or None,
+        "at": now.isoformat(timespec="seconds"),
+    })
     save_orders(data)
-    return {"sent_to": account.get("email"), "sent_at": stamp,
-            "expires_in_minutes": 30}
+    return {
+        "action": "reset_account_access",
+        "reference": reference,
+        "at": now.isoformat(timespec="seconds"),
+        "summary": f"Access reset sent to {account.get('email')}",
+        "sent_to": account.get("email"),
+        "expires_in_minutes": 30,
+    }
 
 
 # ---- what the model is allowed to ask for ----
@@ -864,16 +1003,20 @@ BACK_OFFICE = {
             },
         ),
     },
-    "issue_refund": {
-        "run": issue_refund, "writes": True,
+    "initiate_refund": {
+        "run": initiate_refund, "writes": True,
         "declaration": types.FunctionDeclaration(
-            name="issue_refund",
-            description="Raise a refund against an order. Changes data, so it "
-                        "needs a human to approve it.",
+            name="initiate_refund",
+            description="PROPOSE a refund against an order. You are not "
+                        "carrying this out -- a human reviews and approves "
+                        "every proposal before anything changes.",
             parameters_json_schema={
                 "type": "object",
                 "properties": {
                     "order_id": {"type": "string", "description": "e.g. OD-4471"},
+                    "amount": {"type": "integer",
+                               "description": "Amount to refund. Omit for the "
+                                              "full order value."},
                     "reason": {"type": "string",
                                "description": "Why the refund is being raised"},
                 },
@@ -881,23 +1024,63 @@ BACK_OFFICE = {
             },
         ),
     },
-    "send_password_reset": {
-        "run": send_password_reset, "writes": True,
+    "expedite_delivery": {
+        "run": expedite_delivery, "writes": True,
         "declaration": types.FunctionDeclaration(
-            name="send_password_reset",
-            description="Email a password reset link. Changes data, so it "
-                        "needs a human to approve it.",
+            name="expedite_delivery",
+            description="PROPOSE moving an order to the fastest service. You "
+                        "are not carrying this out -- a human reviews and "
+                        "approves every proposal before anything changes.",
             parameters_json_schema={
                 "type": "object",
                 "properties": {
-                    "email": {"type": "string",
-                              "description": "The account email. Optional."},
+                    "order_id": {"type": "string", "description": "e.g. OD-4468"},
+                },
+                "required": ["order_id"],
+            },
+        ),
+    },
+    "reset_account_access": {
+        "run": reset_account_access, "writes": True,
+        "declaration": types.FunctionDeclaration(
+            name="reset_account_access",
+            description="PROPOSE sending the customer a fresh sign-in link. "
+                        "You are not carrying this out -- a human reviews and "
+                        "approves every proposal before anything changes.",
+            parameters_json_schema={
+                "type": "object",
+                "properties": {
+                    "customer_id": {"type": "string",
+                                    "description": "e.g. CU-1001. Optional."},
                 },
             },
         ),
     },
 }
 
+WRITE_TOOLS = {name for name, t in BACK_OFFICE.items() if t["writes"]}
+
+
+def tools_for(allow_writes):
+    """The declarations handed to the API for this turn.
+
+    With actions off, the write declarations are NOT SENT. The model is not
+    told these functions exist, so there is no call for it to make and no
+    refusal for anyone to have to trust.
+
+    That is a stronger guarantee than offering a tool and declining to run it.
+    Declining server-side leaves the model believing an action is available:
+    it proposes one in its prose, the refusal happens somewhere the agent
+    cannot see, and the safety of the whole thing rests on a branch that has
+    to be right every time. Withholding the declaration removes the question.
+    """
+    return [types.Tool(function_declarations=[
+        t["declaration"] for t in BACK_OFFICE.values()
+        if allow_writes or not t["writes"]
+    ])]
+
+
+# Kept for the read-only path and for anything that just wants the full list.
 BACK_OFFICE_TOOL = types.Tool(
     function_declarations=[t["declaration"] for t in BACK_OFFICE.values()]
 )
@@ -926,11 +1109,14 @@ class AICoach:
         self.last_redactions = []      # what the most recent call took out
         self.last_article = None       # the help article behind the last reply
 
-        # You can change this through an environment variable, for example
-        # os.environ["GEMINI_MODEL"] = "gemini-3.7-flash" for the newest model.
+        # Flash-lite by default, deliberately. The full flash model hits the
+        # free tier's per-minute limit constantly, and every retry costs a
+        # 1s/2s/4s backoff before the fallback -- measured at 90s for a single
+        # draft against 3.6s on lite. Set GEMINI_MODEL to override, for
+        # example os.environ["GEMINI_MODEL"] = "gemini-3.5-flash".
         self.model = os.getenv(
             "GEMINI_MODEL",
-            "gemini-3.5-flash"
+            "gemini-3.5-flash-lite"
         )
 
     # ---------------- Helper functions ----------------
@@ -1129,6 +1315,21 @@ How to judge:
 - If this is the first customer message, there is no trajectory yet, so the
   trend is "flat".
 
+Intent and emotion:
+- The intent is what the customer wants DONE, not how they feel about it.
+  "Where is my money" after a failed payment is "Refund status", not
+  "Billing dispute" -- a dispute is a charge they say is wrong, not one they
+  are already owed back.
+- Choose "Other" only when nothing in the list fits. A weak fit reported with
+  a low confidence is more useful than "Other" with a high one.
+- intent_confidence is about the CATEGORY, not the severity. Around 90 when
+  the customer names the problem outright, around 40 when you are inferring
+  it from one vague line.
+- The emotion is the dominant one in the LAST message, judged in context.
+  "Confused", "Anxious" and "Frustrated" are distinct: confusion is not
+  understanding, anxiety is fear of the outcome, frustration is understanding
+  perfectly well and being blocked anyway.
+
 The shape of your answer is fixed by the response schema, so just fill it in.
 """
 
@@ -1152,6 +1353,39 @@ The shape of your answer is fixed by the response schema, so just fill it in.
 
         if reading.get("trend") not in ("rising", "falling", "flat"):
             reading["trend"] = "flat"
+
+        # ---- intent, confidence and emotion ----
+        #
+        # The schema's enum makes a bad value unlikely, but not impossible:
+        # the lite model we fall back to on a rate limit does not always
+        # honour the schema. A category the panel cannot paint must never be
+        # the thing that breaks the panel.
+        raw_intent = reading.get("intent")
+        if raw_intent not in INTENTS:
+            if raw_intent:          # absent is not the same as wrong
+                print(f"  analyse: intent {raw_intent!r} is not in INTENTS, "
+                      f"storing 'Other'")
+            reading["intent"] = "Other"
+
+        # Emotion has no "Other", and defaulting to "Calm" would assert
+        # something the model never said -- a falsely reassuring reading is
+        # the one failure this panel exists to prevent. So an unusable value
+        # becomes no value, and the pill renders as a dash.
+        raw_emotion = reading.get("emotion")
+        if raw_emotion not in EMOTIONS:
+            if raw_emotion:
+                print(f"  analyse: emotion {raw_emotion!r} is not in EMOTIONS, "
+                      f"storing nothing")
+            reading["emotion"] = ""
+
+        # Missing confidence stays None rather than becoming 0, so the panel
+        # can hide the label entirely instead of showing a number nobody
+        # measured. 0 would read as "certainly not", which is a claim.
+        try:
+            reading["intent_confidence"] = max(
+                0, min(100, int(reading["intent_confidence"])))
+        except (KeyError, TypeError, ValueError):
+            reading["intent_confidence"] = None
 
         return reading
 
@@ -1272,11 +1506,16 @@ rather than generalities. Rules:
                 response = self._call_model(
                     history,
                     types.GenerateContentConfig(
-                        tools=[BACK_OFFICE_TOOL],
+                        tools=tools_for(allow_writes),
                         # We run the functions ourselves, so the SDK must not.
                         automatic_function_calling=
                             types.AutomaticFunctionCallingConfig(disable=True),
                     ),
+                    # Without this the loop reported itself as "generate",
+                    # because that is _call_model's default -- so every token
+                    # the lookup step spent was filed under the wrong step on
+                    # the Cost page. self._operation is already "lookup" here.
+                    operation=self._operation,
                 )
             except Exception as error:
                 # A lookup failing must never stop us replying to the customer.
@@ -1304,11 +1543,18 @@ rather than generalities. Rules:
                 if tool is None:
                     result = {"error": f"No such function: {call.name}"}
                     ran = False
-                elif tool["writes"] and not allow_writes:
-                    # Requested, deliberately not run.
-                    result = {"status": "awaiting approval",
-                              "detail": "A person must approve this action "
-                                        "before it is carried out."}
+                elif tool["writes"]:
+                    # NEVER run from inside this loop -- not on high
+                    # confidence, not on low risk, not ever.
+                    #
+                    # allow_writes decided whether the model was allowed to
+                    # ASK. It has no say in whether the action HAPPENS. That
+                    # is a person clicking Approve, which calls tool["run"]
+                    # from the approval route, nowhere near the model.
+                    result = {"status": "proposed",
+                              "detail": "Recorded as a proposed action. A "
+                                        "person must approve it before "
+                                        "anything changes."}
                     ran = False
                 else:
                     try:
@@ -1321,7 +1567,10 @@ rather than generalities. Rules:
                 performed.append({"name": call.name, "args": args,
                                   "result": result,
                                   "writes": bool(tool and tool["writes"]),
-                                  "ran": ran})
+                                  "ran": ran,
+                                  # a write the model asked for, awaiting a
+                                  # human decision
+                                  "proposed": bool(tool and tool["writes"])})
                 # The RESULT is full of real order ids, emails and amounts,
                 # and it is about to be sent straight back to the model. Clean
                 # it on the way out; the untouched copy stays in `performed`
