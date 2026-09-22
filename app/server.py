@@ -21,13 +21,14 @@ import io
 import json
 import logging
 import os
+import re
 import socket
 import sqlite3
 import subprocess
 import sys
 import time
-from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 
 from flask import Flask, Response, jsonify, redirect, request, send_from_directory
 from flask_login import current_user, login_user, logout_user
@@ -35,7 +36,8 @@ from flask_login import current_user, login_user, logout_user
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import auth  # noqa: E402  (needs HERE on the path)
+import actions  # noqa: E402  (needs HERE on the path)
+import auth  # noqa: E402
 import metering  # noqa: E402
 from auth import require_role  # noqa: E402
 
@@ -211,6 +213,7 @@ def connect():
 # test suite repoints the path after import -- so hand them the factory, not
 # the path.
 auth.configure(connect)
+actions.configure(connect)
 metering.configure(connect)
 
 # Every Gemini call the engine makes now reports its token count here. The
@@ -222,8 +225,31 @@ def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
         conn.executescript(auth.SCHEMA)
+        conn.executescript(actions.SCHEMA)
         conn.executescript(metering.SCHEMA)
         apply_migrations(conn)
+
+
+def backfill_resolution_modes():
+    """Give older cases the resolution_mode they were closed under.
+
+    Runs once at startup and is idempotent -- a row that already has the
+    field is left alone, so this costs nothing on every boot after the first.
+    Without it the dashboard would show a split bar covering only the cases
+    saved since the feature shipped, which reads as "AI did nothing until
+    last Tuesday" rather than as missing data.
+    """
+    filled = 0
+    for case in load_cases():
+        if case.get("resolution_mode") is not None:
+            continue
+        mode = resolution_mode_for(case)
+        if mode is None:
+            continue                  # nothing was ever sent on this one
+        case["resolution_mode"] = mode
+        save_case(case)
+        filled += 1
+    return filled
 
 
 def migrate_from_json():
@@ -341,6 +367,129 @@ def signed_in_username():
         return None          # no request context -- tests, or a CLI command
 
 
+RESOLUTION_MODES = ("ai_autonomous", "hybrid", "human")
+
+# How close a sent reply has to be to the draft we offered before we call it
+# the draft. Chosen by the brief; it is a ratio over the whole string, so an
+# agent who keeps the shape and swaps a sentence still lands above it, while
+# somebody who types their own answer does not.
+HYBRID_SIMILARITY = 0.60
+
+
+def similarity(left, right):
+    """0.0-1.0 on two pieces of text, case and whitespace insensitive."""
+    if not left or not right:
+        return 0.0
+    return SequenceMatcher(None, " ".join(str(left).lower().split()),
+                           " ".join(str(right).lower().split())).ratio()
+
+
+def outgoing_sources(case):
+    """Who composed each outgoing message on this case.
+
+    Messages written from now on carry `source` on them, set at the moment
+    they were sent, which is the only time anybody actually knows. Older ones
+    predate the field, so it is INFERRED here by the same rules the live path
+    applies -- a reply that closely matches the draft we offered was worked
+    from that draft. That is what makes the backfill and the live value the
+    same number rather than two different definitions wearing one name.
+    """
+    auto = (case.get("auto_reply") or {}).get("reply", "")
+    suggestion = case.get("suggestion") or ""
+
+    sources = []
+    for message in case.get("messages", []):
+        if message.get("speaker") != "agent":
+            continue                      # only outgoing messages have an author
+
+        recorded = message.get("source")
+        if recorded in ("ai", "hybrid", "human"):
+            sources.append(recorded)
+            continue
+
+        text = message.get("text", "")
+        if auto and similarity(text, auto) > 0.98:
+            sources.append("ai")          # this is the deflection itself
+        elif similarity(text, suggestion) > HYBRID_SIMILARITY:
+            sources.append("hybrid")
+        else:
+            sources.append("human")
+
+    return sources
+
+
+def resolution_mode_for(case):
+    """Which of the three modes closed this case, or None if nothing was sent.
+
+    A case nobody has replied to yet has no resolver, and guessing one would
+    put a case in the split bar that nobody has worked.
+    """
+    sources = outgoing_sources(case)
+    if not sources:
+        return None
+
+    if all(s == "ai" for s in sources):
+        return "ai_autonomous"
+    if all(s == "human" for s in sources):
+        return "human"
+    # Everything else had a person AND the coach in it: a used draft, or a
+    # deflection an agent later followed up by hand. Neither "AI end to end"
+    # nor "a human wrote every word" is true of those, and calling them
+    # either one would overstate exactly the number this exists to report.
+    return "hybrid"
+
+
+CHANNELS = ("typed", "voice")
+
+
+def read_channel(body):
+    """How the caller says this message was entered. Anything unrecognised is
+    treated as typed -- the transcript should never claim a message was
+    dictated on the strength of a value we do not know."""
+    wanted = (body or {}).get("channel", "typed")
+    return wanted if wanted in CHANNELS else "typed"
+
+
+def may_use_write_actions():
+    """Whether this session may arm, or approve, a write action.
+
+    A rank floor, so a customer -- who sits below every staff role -- can
+    never reach it whatever the checkbox in their browser says. The check
+    lives here rather than being repeated at each call site, because a write
+    action guarded in three places out of four is not guarded.
+    """
+    return (current_user.is_authenticated
+            and current_user.at_least("lead"))
+
+
+def record_proposals(session):
+    """Write every write the model just asked for into the audit trail.
+
+    Called on the customer turn, before the agent is shown anything. An
+    identical proposal already waiting on this case is not duplicated -- the
+    model re-asks for the same refund on every turn of a conversation that
+    needs one, and a queue of eleven identical cards is a way of making sure
+    nobody reads any of them.
+    """
+    if not session.case_id:
+        return
+
+    waiting = actions.pending_for_case(session.case_id)
+    known = {(p["action"], json.dumps(p["args"], sort_keys=True))
+             for p in waiting}
+
+    for fact in session.facts or []:
+        if not fact.get("proposed"):
+            continue
+        key = (fact["name"], json.dumps(fact.get("args") or {}, sort_keys=True))
+        if key in known:
+            continue
+        known.add(key)
+        actions.propose(session.case_id, signed_in_username(),
+                        fact["name"], fact.get("args") or {},
+                        reason=session.state.key_issue or None)
+
+
 def may_see_case(case):
     """Whether the signed-in user is allowed to open this one case.
 
@@ -396,8 +545,27 @@ class LiveSession:
         return self._coach
 
     # -- persistence ------------------------------------------------------
+    def real_calls(self):
+        """How many model calls this case has actually made.
+
+        Read from the metering table instead of counted by hand. Every call
+        goes through _call_model or report_usage, both of which record a row,
+        so this cannot miss the tool-calling loop or the embeddings the way
+        the manual counter did -- it was showing 2 for a turn that made 7.
+
+        A case saved before metering existed has no rows; that falls back to
+        whatever it stored rather than rewriting its history to zero.
+        """
+        if not self.case_id:
+            return self.calls
+        try:
+            counted = metering.for_case(self.case_id)["calls"]
+        except Exception:
+            return self.calls          # metering must never break a turn
+        return counted or self.calls
+
     def as_case(self, status="pending", closed_at=None):
-        return {
+        case = {
             "id": self.case_id,
             "owner": self.owner,
             "opened_at": self.opened_at,
@@ -405,13 +573,16 @@ class LiveSession:
             "closed_at": closed_at,
             "status": status,
             "turns": len(self.state.history),
-            "calls": self.calls,
+            "calls": self.real_calls(),
             "sentiment": self.state.sentiment,
             "urgency": self.state.urgency,
             "escalation_risk": self.state.escalation_risk,
             "frustration": self.state.frustration,
             "trend": self.state.trend,
             "key_issue": self.state.key_issue,
+            "intent": self.state.intent,
+            "intent_confidence": self.state.intent_confidence,
+            "emotion": self.state.emotion,
             "trajectory": list(self.trajectory),
             # The detail view shows these, so they have to be saved with the
             # case -- previously they lived only in memory and were lost the
@@ -424,10 +595,17 @@ class LiveSession:
             "facts": list(self.facts),
             "auto_reply": self.auto_reply,
             "messages": [
-                {"speaker": m.speaker, "text": m.text}
+                {"speaker": m.speaker, "text": m.text,
+                 "source": getattr(m, "source", "human"),
+                 "channel": getattr(m, "channel", "typed")}
                 for m in self.state.history
             ],
         }
+        # Derived, never set by hand, so it cannot drift from the messages it
+        # describes. Computed on every save rather than once at close: a case
+        # that reopens and gets a human reply has genuinely changed hands.
+        case["resolution_mode"] = resolution_mode_for(case)
+        return case
 
     def persist(self, status="pending", closed_at=None, reopen=False):
         """Insert or update this conversation in cases.json.
@@ -466,6 +644,15 @@ class LiveSession:
                 if keep_closed and status == "pending":
                     record["status"] = was
                     record["closed_at"] = case.get("closed_at")
+
+                # The customer owns these, not the console. as_case() rebuilds
+                # the row from session state, which has never seen a rating --
+                # so without this an agent reopening a rated case and typing
+                # one line would silently delete the rating.
+                for field in CUSTOMER_FIELDS:
+                    if field in case:
+                        record[field] = case[field]
+
                 cases[index] = record
                 break
         else:
@@ -501,7 +688,9 @@ class LiveSession:
 
         for message in case.get("messages", []):
             self.state.add_message(message.get("speaker", "customer"),
-                                   message.get("text", ""))
+                                   message.get("text", ""),
+                                   message.get("source", "human"),
+                                   message.get("channel", "typed"))
 
         # The agent replies to the last thing the CUSTOMER said, which is not
         # necessarily the last line of the transcript.
@@ -516,12 +705,20 @@ class LiveSession:
         self.state.frustration = case.get("frustration", 0)
         self.state.trend = case.get("trend", "unknown")
         self.state.key_issue = case.get("key_issue", "")
+        # Cases saved before intent extraction have none of these, so they
+        # fall back to empty and the panel shows a dash rather than stale
+        # readings from whatever was open previously.
+        self.state.intent = case.get("intent", "")
+        self.state.intent_confidence = case.get("intent_confidence")
+        self.state.emotion = case.get("emotion", "")
 
     def as_dict(self):
         return {
             "case_id": self.case_id,
             "history": [
-                {"speaker": m.speaker, "text": m.text}
+                {"speaker": m.speaker, "text": m.text,
+                 "channel": getattr(m, "channel", "typed"),
+                 "source": getattr(m, "source", "human")}
                 for m in self.state.history
             ],
             "sentiment": self.state.sentiment,
@@ -530,8 +727,11 @@ class LiveSession:
             "frustration": self.state.frustration,
             "trend": self.state.trend,
             "key_issue": self.state.key_issue,
+            "intent": self.state.intent,
+            "intent_confidence": self.state.intent_confidence,
+            "emotion": self.state.emotion,
             "trajectory": self.trajectory,
-            "calls": self.calls,
+            "calls": self.real_calls(),
             "model": self._coach.model if self._coach else None,
             "last_feedback": self.last_feedback,
             "last_suggestion": self.last_suggestion,
@@ -541,6 +741,10 @@ class LiveSession:
             "ratings": self.ratings,
             "allow_writes": self.allow_writes,
             "auto_reply": self.auto_reply,
+            # Proposals and completed runs for this case. Read from the audit
+            # table rather than kept on the session, so reopening a case from
+            # the dashboard shows the same history the trail does.
+            "actions": actions.for_case(self.case_id) if self.case_id else [],
         }
 
 
@@ -615,6 +819,172 @@ def sla_for(case, now=None):
         result["status"] = "on_track"
 
     return result
+
+
+# ==========================================================================
+# Customer satisfaction
+# ==========================================================================
+# A rating stays editable for a day. Long enough that somebody who rated in
+# irritation and then got a good outcome can correct it; short enough that the
+# history stops moving under the dashboard.
+CSAT_EDIT_HOURS = 24
+
+# Written against the stored row by the rating endpoint, never by the live
+# session. persist() copies them forward; see the note there.
+CUSTOMER_FIELDS = ("csat_score", "csat_comment", "csat_at")
+
+# Below this many ratings an average is reported WITH its sample size and
+# rendered faintly. Ten is not a significance threshold -- it is the point
+# below which a single rating moves the mean by more than a tenth of a star,
+# which is the resolution the tile is displayed at.
+CSAT_SMALL_SAMPLE = 10
+
+CLOSED = ("resolved", "auto_resolved")
+
+
+def record_csat(case, score, comment="", now=None):
+    """Attach a customer rating to a case.
+
+    Returns (case, None) or (None, why). The rules live here rather than in
+    the route so the portal, the chat view and the test suite are all held to
+    the same ones.
+    """
+    now = now or datetime.now(UTC)
+
+    if case.get("status") not in CLOSED:
+        return None, "That case is not resolved yet."
+
+    # Parsed through str() so a float like 2.5 raises rather than truncating
+    # to 2. Half a star is not a rating this scale offers, and quietly
+    # rounding it records something the customer did not say.
+    if isinstance(score, bool):
+        return None, "A rating must be a whole number of stars."
+    try:
+        value = int(str(score).strip())
+    except (TypeError, ValueError):
+        return None, "A rating must be a whole number of stars."
+    if not 1 <= value <= 5:
+        return None, "A rating must be between 1 and 5 stars."
+
+    # csat_at anchors the edit window and is NOT moved by a later edit --
+    # otherwise each change would buy another day and the window would never
+    # close.
+    first = parse_time(case.get("csat_at"))
+    if first is not None:
+        hours = (now - first).total_seconds() / 3600
+        if hours > CSAT_EDIT_HOURS:
+            return None, (f"This rating can no longer be changed. Ratings stay "
+                          f"open for {CSAT_EDIT_HOURS} hours.")
+    else:
+        case["csat_at"] = now.isoformat(timespec="seconds")
+
+    case["csat_score"] = value
+    case["csat_comment"] = (comment or "").strip()[:280]
+    return case, None
+
+
+def rated(cases):
+    return [c for c in cases if isinstance(c.get("csat_score"), int)]
+
+
+def csat_summary(cases):
+    """The CSAT tile: an average, and how much of the closed work it covers."""
+    closed = [c for c in cases if c.get("status") in CLOSED]
+    scores = [c["csat_score"] for c in rated(closed)]
+
+    return {
+        "average": round(sum(scores) / len(scores), 2) if scores else None,
+        "count": len(scores),
+        "eligible": len(closed),
+        "response_rate": round(100 * len(scores) / len(closed)) if closed else 0,
+        "small_sample": len(scores) < CSAT_SMALL_SAMPLE,
+    }
+
+
+def csat_by_mode(cases):
+    """Average CSAT per resolution mode -- the comparison worth having.
+
+    Each mode carries its own sample size, because "AI 4.8 vs human 4.1" means
+    nothing until you know whether that is 40 ratings or two.
+    """
+    out = []
+    for mode in RESOLUTION_MODES:
+        scores = [c["csat_score"] for c in rated(cases)
+                  if (c.get("resolution_mode") or resolution_mode_for(c)) == mode]
+        out.append({
+            "mode": mode,
+            "average": round(sum(scores) / len(scores), 2) if scores else None,
+            "count": len(scores),
+            "small_sample": len(scores) < CSAT_SMALL_SAMPLE,
+        })
+    return out
+
+
+def median_first_reply(cases):
+    """Median seconds from the customer's first message to the first reply.
+
+    The median, not the mean: one case that sat overnight drags a mean far
+    enough to make a good week look bad, and the tile is meant to describe
+    the typical wait rather than the worst one.
+    """
+    waits = sorted(
+        seconds for seconds in
+        (sla_for(case).get("first_response_seconds") for case in cases)
+        if isinstance(seconds, int) and seconds >= 0
+    )
+    if not waits:
+        return {"median_seconds": None, "count": 0}
+
+    middle = len(waits) // 2
+    median = (waits[middle] if len(waits) % 2
+              else (waits[middle - 1] + waits[middle]) / 2)
+    return {"median_seconds": int(median), "count": len(waits)}
+
+
+# The knowledge base's topics are the issue groups this app had before intents
+# existed. Mapping them onto the intent vocabulary means one category axis
+# rather than two that nearly agree.
+TOPIC_AS_INTENT = {
+    "refund": "Refund status",
+    "recharge": "Recharge failed",
+    "delivery": "Order & delivery",
+    "network": "Network issue",
+    "account": "Account & login",
+}
+UNCATEGORISED = "Uncategorised"
+
+
+def category_of(case):
+    """Which bucket a case belongs in, best source first."""
+    intent = case.get("intent")
+    if intent:
+        return intent
+
+    # Older cases have no intent, but a deflection or a rated suggestion
+    # recorded which help article matched, which is the same question asked
+    # a different way.
+    topic = (case.get("auto_reply") or {}).get("topic")
+    if not topic:
+        topic = next((r.get("topic") for r in reversed(case.get("ratings") or [])
+                      if r.get("topic")), None)
+    return TOPIC_AS_INTENT.get(topic, UNCATEGORISED)
+
+
+def category_volume(cases):
+    """Ticket count per category, biggest first."""
+    counts = {}
+    for case in cases:
+        counts[category_of(case)] = counts.get(category_of(case), 0) + 1
+
+    total = sum(counts.values())
+    rows = [{"category": name, "count": n,
+             "share": round(100 * n / total) if total else 0}
+            for name, n in counts.items()]
+    # Biggest first, and Uncategorised last whatever its size -- it is the
+    # absence of an answer, not one of the answers.
+    rows.sort(key=lambda r: (r["category"] == UNCATEGORISED, -r["count"],
+                             r["category"]))
+    return {"rows": rows, "total": total}
 
 
 def try_auto_resolve(text):
@@ -755,6 +1125,56 @@ def do_login():
                     "next": landing_for(user, body.get("next", ""))})
 
 
+# Self-service sign-up always lands on the LOWEST role. Nobody gets to give
+# themselves the dashboard, the write-action gate or the CSV exports by
+# filling in a form -- a lead or an admin is still made deliberately, from
+# the command line with --add-user.
+SIGNUP_ROLE = "agent"
+
+# Letters, digits, dot, dash, underscore. create_user() lowercases and
+# strips, but it would otherwise accept a username with spaces in it, which
+# then reads badly everywhere it is displayed.
+USERNAME_SHAPE = re.compile(r"[a-z0-9._-]{3,32}")
+
+
+@app.post("/api/register")
+def register():
+    """Create an account from the login page, and sign it straight in.
+
+    Deliberately NOT role-selectable. The form cannot ask for a role and the
+    server does not read one if it is sent.
+    """
+    body = request.json or {}
+    username = (body.get("username") or "").strip().lower()
+    password = body.get("password") or ""
+    confirm = body.get("confirm") or ""
+    display = (body.get("display_name") or "").strip()
+
+    if not USERNAME_SHAPE.fullmatch(username):
+        return jsonify({"ok": False, "error": (
+            "A username is 3-32 characters, using letters, numbers, dot, "
+            "dash or underscore.")}), 400
+
+    if password != confirm:
+        return jsonify({"ok": False,
+                        "error": "The two passwords do not match."}), 400
+
+    try:
+        auth.create_user(username, password, SIGNUP_ROLE,
+                         display_name=display or None)
+    except ValueError as why:
+        # create_user already refuses a short password and a duplicate name.
+        return jsonify({"ok": False, "error": str(why)}), 400
+
+    user, problem = auth.authenticate(username, password)
+    if user is None:
+        return jsonify({"ok": False, "error": problem}), 400
+
+    login_user(user, remember=False, duration=None)
+    return jsonify({"ok": True, "created": True, "user": user.as_dict(),
+                    "next": landing_for(user, body.get("next", ""))})
+
+
 @app.post("/api/logout")
 def do_logout():
     logout_user()
@@ -810,14 +1230,15 @@ def health():
         "ok": True,
         "has_key": has_key,
         "key_file": key_file or None,
-        "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
     })
 
 
 @app.post("/api/customer")
 @require_role("agent")
 def customer_message():
-    text = (request.json or {}).get("text", "").strip()
+    body = request.json or {}
+    text = (body.get("text", "") or "").strip()
     if not text:
         return jsonify({"ok": False, "error": "Empty message."}), 400
 
@@ -825,7 +1246,10 @@ def customer_message():
     if refused:
         return refused
 
-    session.state.add_message("customer", text)
+    # Voice is an INPUT METHOD. The channel is recorded on the message and
+    # changes nothing about what happens next -- the same text goes down the
+    # same pipeline whether it was typed or spoken.
+    session.state.add_message("customer", text, channel=read_channel(body))
     session.last_customer_message = text
 
     # Log it before we call the model -- whether we can answer this has
@@ -850,7 +1274,6 @@ def customer_message():
         session.persist()            # keep the case even if the model failed
         return failure(error)
     elapsed = int((time.perf_counter() - started) * 1000)
-    session.calls += 1
 
     session.state.sentiment = analysis.get("sentiment", "unknown")
     session.state.urgency = analysis.get("urgency", "unknown")
@@ -860,6 +1283,11 @@ def customer_message():
         "frustration", FALLBACK_SCORE.get(session.state.escalation_risk, 35)
     )
     session.state.trend = analysis.get("trend", "flat")
+    # analyze_customer_message() has already forced these into their enums, so
+    # whatever arrives here is paintable.
+    session.state.intent = analysis.get("intent", "")
+    session.state.intent_confidence = analysis.get("intent_confidence")
+    session.state.emotion = analysis.get("emotion", "")
     note_redactions(session)
     session.trajectory.append(session.state.frustration)
 
@@ -872,6 +1300,16 @@ def customer_message():
     except Exception:
         session.facts = []          # a lookup failing must not lose the turn
 
+    # Anything the model asked to WRITE is recorded as a proposal now. It is
+    # not run here, and there is no branch below that runs it.
+    try:
+        record_proposals(session)
+    except Exception as error:
+        # Fails closed and loudly. With no row in the trail there is no card
+        # to approve, so nothing can run -- but a silent audit failure on a
+        # safety path is its own bug, so it is never swallowed quietly.
+        print(f"  AUDIT: could not record proposals: {error}")
+
     # Can we just answer this, without an agent ever seeing it?
     session.auto_reply = None
     try:
@@ -881,11 +1319,10 @@ def customer_message():
 
     if auto:
         session.auto_reply = auto
-        session.calls += 1
         # The automatic answer is a real reply, so it goes in the transcript
         # and it stops the first-response clock. Deflection answers instantly,
         # which is rather the point of it.
-        session.state.add_message("agent", auto["reply"])
+        session.state.add_message("agent", auto["reply"], source="ai")
         # An automatic answer is only ever sent when an article matched.
         open_rating_slot(session, True, auto.get("topic"))
         session.last_suggestion = auto["reply"]
@@ -911,7 +1348,6 @@ def customer_message():
                 },
                 facts=session.facts,
             )
-            session.calls += 1
             note_redactions(session)
 
             article = getattr(session.coach, "last_article", None)
@@ -939,7 +1375,8 @@ def customer_message():
 @app.post("/api/agent")
 @require_role("agent")
 def agent_message():
-    text = (request.json or {}).get("text", "").strip()
+    body = request.json or {}
+    text = (body.get("text", "") or "").strip()
     if not text:
         return jsonify({"ok": False, "error": "Empty message."}), 400
 
@@ -953,7 +1390,15 @@ def agent_message():
     if refused:
         return refused
 
-    session.state.add_message("agent", text)
+    # Two ways to land on hybrid. The console says so outright when the agent
+    # pressed "Use this reply"; the similarity check catches the agent who
+    # copied the draft by hand, or pressed the button, edited a line and sent
+    # it. Either is a draft that did work, which is what hybrid means.
+    clicked = bool(body.get("used_suggestion"))
+    close = similarity(text, session.last_suggestion) > HYBRID_SIMILARITY
+    session.state.add_message(
+        "agent", text, source="hybrid" if (clicked or close) else "human",
+        channel=read_channel(body))
 
     # The moment the customer first hears back stops the SLA clock.
     if session.first_response_at is None:
@@ -982,7 +1427,6 @@ def agent_message():
         return failure(error)
     note_redactions(session)
     elapsed = int((time.perf_counter() - started) * 1000)
-    session.calls += 2
 
     session.last_feedback = {
         "tone_score": feedback.tone_score,
@@ -1011,13 +1455,135 @@ def agent_message():
 @app.post("/api/allow-writes")
 @require_role("lead")
 def set_allow_writes():
-    """Turn human approval for data-changing actions on or off.
+    """Decide whether the model may ASK for a data-changing action.
 
-    Off by default. With it off, the model may still ASK for a refund -- the
-    request is recorded and left uncarried out.
+    This is the only thing the checkbox controls. With it on, the write
+    declarations are sent to the API and the model can propose one; with it
+    off they are not sent at all, so there is nothing for it to propose.
+
+    Neither setting lets anything run. A proposal becomes a change when a
+    person clicks Approve, and nowhere else.
     """
+    if not may_use_write_actions():
+        return jsonify({"ok": False,
+                        "error": "Your role cannot arm write actions."}), 403
+
     session.allow_writes = bool((request.json or {}).get("allow", False))
-    return jsonify({"ok": True, "allow_writes": session.allow_writes})
+    return jsonify({"ok": True, "allow_writes": session.allow_writes,
+                    "offered": sorted(coach_core.WRITE_TOOLS)
+                    if session.allow_writes else []})
+
+
+@app.post("/api/actions/<int:action_id>/decide")
+@require_role("lead")
+def decide_action(action_id):
+    """Approve or reject one proposed write. THE approval point.
+
+    This is the only place in the application that calls a write tool, and it
+    is reachable only by an authenticated person POSTing a decision. The model
+    cannot reach it: it has no HTTP client, and the function-calling loop
+    never runs a tool marked `writes`.
+    """
+    if not may_use_write_actions():
+        return jsonify({"ok": False,
+                        "error": "Your role cannot approve actions."}), 403
+
+    wanted = (request.json or {}).get("decision", "")
+    if wanted not in (actions.APPROVED, actions.REJECTED):
+        return jsonify({"ok": False,
+                        "error": "Decision must be approved or rejected."}), 400
+
+    proposal = actions.get(action_id)
+    if proposal is None:
+        return jsonify({"ok": False, "error": f"No action {action_id}."}), 404
+
+    # The proposal belongs to a case, and the case has its own visibility
+    # rules. Approving a refund on somebody else's case is not a thing.
+    if proposal["case_id"]:
+        case = next((c for c in load_cases()
+                     if c.get("id") == proposal["case_id"]), None)
+        if case is not None and not may_see_case(case):
+            return jsonify({"ok": False,
+                            "error": "That action is on another agent's case."}), 403
+
+    # Recorded BEFORE the tool runs. If the write then fails, the trail still
+    # shows that a person approved it, which is the fact being audited.
+    decided, why = actions.decide(action_id, wanted, signed_in_username())
+    if decided is None:
+        return jsonify({"ok": False, "error": why}), 409
+
+    if wanted == actions.REJECTED:
+        return jsonify({"ok": True, "action": decided,
+                        "state": session.as_dict()})
+
+    tool = coach_core.BACK_OFFICE.get(decided["action"])
+    if tool is None or not tool["writes"]:
+        return jsonify({"ok": False,
+                        "error": f"{decided['action']} is not a write tool."}), 400
+
+    try:
+        result = tool["run"](**(decided["args"] or {}))
+    except Exception as error:
+        result = {"error": f"{type(error).__name__}: {error}"}
+
+    decided = actions.record_result(action_id, result)
+
+    # The run is part of the case, so it survives a reload and a reopen.
+    session.persist()
+    return jsonify({"ok": True, "action": decided,
+                    "state": session.as_dict()})
+
+
+@app.get("/api/actions")
+@require_role("lead")
+def list_actions():
+    """The audit trail, filtered the way the Cases table filters."""
+    rows, matched = actions.listing(
+        query=(request.args.get("q") or "").strip(),
+        action=request.args.get("action", "all"),
+        decision=request.args.get("decision", "all"),
+        limit=int(request.args.get("limit", 200)),
+    )
+    return jsonify({"ok": True, "actions": rows, "shown": len(rows),
+                    "matched": matched, "totals": actions.totals(),
+                    "known": sorted(coach_core.WRITE_TOOLS)})
+
+
+@app.get("/api/actions.csv")
+@require_role("admin")
+def export_actions_csv():
+    """Download the audit trail, honouring whatever filters are active."""
+    rows, _ = actions.listing(
+        query=(request.args.get("q") or "").strip(),
+        action=request.args.get("action", "all"),
+        decision=request.args.get("decision", "all"),
+        limit=100000,
+    )
+
+    columns = ["id", "at", "case_id", "username", "action", "description",
+               "arguments", "reason", "decision", "decided_at", "decided_by",
+               "reference", "outcome"]
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        result = row.get("result") or {}
+        writer.writerow({
+            **{k: row.get(k, "") or "" for k in columns},
+            "arguments": json.dumps(row.get("args") or {}),
+            "outcome": result.get("error") or result.get("summary", ""),
+        })
+
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="support-coach-actions-{stamp}.csv"'
+        },
+    )
 
 
 @app.post("/api/rate")
@@ -1057,6 +1623,71 @@ def reset():
     return jsonify({"ok": True, "state": session.as_dict()})
 
 
+def prepare_reopened_case(session):
+    """Draft a reply, and score it, for a case that was saved without one.
+
+    Cases whose draft failed at the time were saved with suggestion = "" --
+    the empty string at the end of the draft's except branch -- and opening a
+    case only ever replayed stored state. So those cases showed "No
+    suggestion yet" for ever, however many times you opened them.
+
+    This fills the gap once, on open, and persists the result, so opening the
+    same case again costs nothing.
+
+    Returns a dict describing what it produced, or None when there was
+    nothing to do.
+    """
+    if session.last_suggestion or not session.last_customer_message:
+        return None
+
+    allowed, _why = metering.check_limits(signed_in_username())
+    if not allowed:
+        return None          # over budget: leave the panel honestly empty
+
+    try:
+        session.last_suggestion = session.coach.suggest_reply(
+            session.last_customer_message,
+            session.state.history,
+            analysis={
+                "sentiment": session.state.sentiment,
+                "urgency": session.state.urgency,
+                "key_issue": session.state.key_issue,
+            },
+            facts=session.facts,
+        )
+        note_redactions(session)
+        article = getattr(session.coach, "last_article", None)
+        open_rating_slot(session, article is not None,
+                         article.get("topic") if article else None)
+    except Exception as error:
+        # Loud this time. A silently swallowed draft failure is exactly what
+        # left these cases blank in the first place.
+        print(f"  DRAFT on open failed for {session.case_id}: {error}")
+        session.last_suggestion = ""
+        return None
+
+    # Score the draft so the scorecard has something to show before the agent
+    # has written anything. Marked scored="draft" so nothing downstream
+    # mistakes it for a human's reply -- see performance().
+    scored_draft = False
+    if not session.last_feedback:
+        try:
+            verdict = session.coach.evaluate_agent_response(
+                session.last_customer_message, session.last_suggestion)
+            session.last_feedback = {
+                "tone_score": verdict.tone_score,
+                "empathy_score": verdict.empathy_score,
+                "clarity_score": verdict.clarity_score,
+                "coaching_tip": verdict.coaching_tip,
+                "scored": "draft",
+            }
+            scored_draft = True
+        except Exception as error:
+            print(f"  SCORING the draft failed for {session.case_id}: {error}")
+
+    return {"drafted": True, "scored_draft": scored_draft}
+
+
 @app.post("/api/open-case")
 @require_role("agent")
 def open_case():
@@ -1073,8 +1704,10 @@ def open_case():
                 return jsonify({"ok": False,
                                 "error": "That case belongs to another agent."}), 403
             session.load(case)
-            session.persist()      # record the claim if it was unowned
-            return jsonify({"ok": True, "state": session.as_dict()})
+            prepared = prepare_reopened_case(session)
+            session.persist()      # record the claim, and keep the new draft
+            return jsonify({"ok": True, "state": session.as_dict(),
+                            "prepared": prepared})
 
     return jsonify({"ok": False, "error": f"No case {case_id}."}), 404
 
@@ -1094,49 +1727,113 @@ def resolve():
 # ==========================================================================
 # API -- the dashboard
 # ==========================================================================
-def daily_counts(cases, min_days=7, max_days=30):
-    """Cases opened per day, split by their status now.
+# The windows the Trends toggle offers. 24 hours buckets by HOUR: a day
+# split into days is one or two bars, which is not a chart.
+RANGES = {
+    "24h": {"bucket": "hour", "size": 24},
+    "7d":  {"bucket": "day",  "size": 7},
+    "14d": {"bucket": "day",  "size": 14},
+    "30d": {"bucket": "day",  "size": 30},
+}
+DEFAULT_RANGE = "7d"
 
-    Days with no cases are filled in with zeros -- a gap in the middle of a
-    bar chart is information, and leaving those days out would quietly
-    compress the time axis and make the volume look steadier than it was.
+
+def read_range(default=DEFAULT_RANGE):
+    wanted = request.args.get("range", default)
+    return wanted if wanted in RANGES else default
+
+
+def window_starts(range_key):
+    """Every bucket start in the window, oldest first, plus the step size.
+
+    Both charts bucket through here. Two implementations of "the last 7 days"
+    drift the moment one of them is edited, and the two charts sit one above
+    the other where a one-bucket disagreement is plainly visible.
     """
-    buckets = defaultdict(lambda: {"resolved": 0, "pending": 0})
+    spec = RANGES.get(range_key, RANGES[DEFAULT_RANGE])
+    hourly = spec["bucket"] == "hour"
+    now = datetime.now(UTC)
 
+    step = timedelta(hours=1) if hourly else timedelta(days=1)
+    latest = (now.replace(minute=0, second=0, microsecond=0) if hourly
+              else datetime.combine(now.date(), datetime.min.time())
+                           .replace(tzinfo=UTC))
+    return [latest - step * i for i in range(spec["size"] - 1, -1, -1)], step, hourly
+
+
+def bucket_start(when, hourly):
+    """The bucket a timestamp belongs in."""
+    return (when.replace(minute=0, second=0, microsecond=0) if hourly
+            else datetime.combine(when.date(), datetime.min.time())
+                         .replace(tzinfo=UTC))
+
+
+def read_when(case):
+    """A case's opened_at as an aware datetime, or None if unreadable."""
+    opened = case.get("opened_at")
+    if not opened:
+        return None
+    try:
+        return datetime.fromisoformat(opened).astimezone(UTC)
+    except ValueError:
+        return None       # a timestamp we cannot read is not worth a crash
+
+
+def timeline(cases, range_key=DEFAULT_RANGE):
+    """Cases per bucket across a fixed window, ending now.
+
+    Quiet buckets are filled with zeros rather than dropped -- a gap in the
+    middle of a chart is information, and leaving it out would quietly
+    compress the time axis and make volume look steadier than it was.
+
+    Returns [] only when NOTHING in the store has a readable date. A window
+    with no cases in it still returns its empty buckets, so a quiet 24 hours
+    draws an empty axis rather than claiming there are no cases at all.
+    """
+    starts, step, hourly = window_starts(range_key)
+    window_start, latest = starts[0], starts[-1]
+
+    blank = {"resolved": 0, "pending": 0,
+             "ai_autonomous": 0, "hybrid": 0, "human": 0}
+    buckets = {s: dict(blank) for s in starts}
+
+    usable = 0
     for case in cases:
-        opened = case.get("opened_at")
-        if not opened:
+        when = read_when(case)
+        if when is None:
             continue
-        try:
-            day = datetime.fromisoformat(opened).astimezone(UTC).date()
-        except ValueError:
-            continue          # a timestamp we cannot read is not worth a crash
 
-        side = "resolved" if case.get("status") == "resolved" else "pending"
-        buckets[day.isoformat()][side] += 1
+        usable += 1
+        if when < window_start or when > latest + step:
+            continue          # outside the window the viewer asked for
 
-    if not buckets:
+        counts = buckets.get(bucket_start(when, hourly))
+        if counts is None:
+            continue
+
+        counts["resolved" if case.get("status") == "resolved"
+               else "pending"] += 1
+
+        mode = case.get("resolution_mode") or resolution_mode_for(case)
+        if mode in counts:
+            counts[mode] += 1
+
+    if not usable:
         return []
 
-    today = datetime.now(UTC).date()
-    first = min(date.fromisoformat(k) for k in buckets)
-
-    # Show at least a week so the chart has shape, and never more than a
-    # month so the bars stay readable.
-    span = max(min_days, min((today - first).days + 1, max_days))
-    start = today - timedelta(days=span - 1)
-
-    out, cursor = [], start
-    while cursor <= today:
-        counts = buckets.get(cursor.isoformat(), {"resolved": 0, "pending": 0})
+    out = []
+    for start in starts:
+        counts = buckets[start]
         out.append({
-            "day": cursor.isoformat(),
+            "at": start.isoformat(),
+            "day": start.date().isoformat(),
             "resolved": counts["resolved"],
             "pending": counts["pending"],
             "total": counts["resolved"] + counts["pending"],
+            "ai_autonomous": counts["ai_autonomous"],
+            "hybrid": counts["hybrid"],
+            "human": counts["human"],
         })
-        cursor += timedelta(days=1)
-
     return out
 
 
@@ -1280,7 +1977,7 @@ def suggestion_quality(cases):
     }
 
 
-def performance(cases):
+def performance(cases, range_key=None):
     """How the agent is doing, and which way it is going.
 
     Every case carries at most one scorecard, so a "point" here is one scored
@@ -1288,14 +1985,36 @@ def performance(cases):
     honest unit -- pretending to per-reply resolution would be inventing
     detail we do not have.
     """
-    scored = [c for c in cases if c.get("feedback")]
+    # A scorecard marked scored="draft" rates a reply the coach wrote and
+    # nobody sent. Counting it here would mix the model's writing into "how
+    # the agent is doing", which is the one thing this panel must not do.
+    scored = [c for c in cases
+              if c.get("feedback")
+              and (c["feedback"] or {}).get("scored") != "draft"]
     scored.sort(key=lambda c: c.get("opened_at") or "")
+
+    # The chart follows the range toggle; the trend and the themes below do
+    # not. "Improving" judged over whatever window happens to be selected
+    # would flip direction as you click between them, which is a worse
+    # number than no number.
+    def in_window(rows):
+        if not range_key:
+            return rows
+        starts, step, _ = window_starts(range_key)
+        first, last = starts[0], starts[-1] + step
+        return [c for c in rows
+                if (w := read_when(c)) is not None and first <= w <= last]
+
+    charted = in_window(scored)
+    # CSAT rides the same axis, but a rated case is not necessarily a scored
+    # one -- an auto-resolved case has a rating and no scorecard.
+    charted_csat = in_window(rated(cases))
 
     fields = ("tone_score", "empathy_score", "clarity_score")
     short = {"tone_score": "tone", "empathy_score": "empathy",
              "clarity_score": "clarity"}
 
-    if not scored:
+    if not scored and not charted_csat:
         return {"scored": 0, "averages": {}, "by_day": [],
                 "trend": {}, "themes": [], "enough_for_trend": False}
 
@@ -1304,18 +2023,43 @@ def performance(cases):
                   if isinstance(r["feedback"].get(field), (int, float))]
         return round(sum(values) / len(values), 2) if values else None
 
-    # ---- averaged per day, skipping days with no scores ----
-    buckets = {}
-    for case in scored:
-        day = (case.get("opened_at") or "")[:10]
-        buckets.setdefault(day, []).append(case)
+    # ---- averaged per bucket, skipping buckets with no scores ----
+    # An empty bucket is left out rather than plotted as a gap at zero: no
+    # conversation was scored, which is not the same as one scoring nothing.
+    hourly = bool(range_key) and RANGES.get(
+        range_key, RANGES[DEFAULT_RANGE])["bucket"] == "hour"
+
+    def bucket_key(case):
+        when = read_when(case)
+        if when is None:
+            return None
+        return (bucket_start(when, hourly).isoformat() if range_key
+                else (case.get("opened_at") or "")[:10])
+
+    buckets, csat_buckets = {}, {}
+    for case in charted:
+        key = bucket_key(case)
+        if key:
+            buckets.setdefault(key, []).append(case)
+    for case in charted_csat:
+        key = bucket_key(case)
+        if key:
+            csat_buckets.setdefault(key, []).append(case)
 
     by_day = []
-    for day in sorted(buckets):
-        rows = buckets[day]
+    for key in sorted(set(buckets) | set(csat_buckets)):
+        rows = buckets.get(key, [])
+        rated_rows = csat_buckets.get(key, [])
+        stars = [r["csat_score"] for r in rated_rows]
         by_day.append({
-            "day": day, "n": len(rows),
+            "at": key,
+            "day": key[:10],
+            "n": len(rows),
             **{short[f]: mean(rows, f) for f in fields},
+            # None rather than 0 for a bucket nobody rated -- no rating is
+            # not a rating of nothing, and the line should break, not dive.
+            "csat": round(sum(stars) / len(stars), 2) if stars else None,
+            "csat_n": len(stars),
         })
 
     # ---- which way is it going? ----
@@ -1363,11 +2107,72 @@ def performance(cases):
     }
 
 
+@app.post("/api/cases/<case_id>/csat")
+@require_role("agent")
+def rate_case(case_id):
+    """Record the customer's rating of one resolved case.
+
+    Guarded by case visibility rather than by a role of its own, so it starts
+    working for a customer the moment the customer role and the portal exist
+    -- may_see_case() is where "their own ticket" will be answered.
+    """
+    body = request.json or {}
+
+    for case in load_cases():
+        if case.get("id") != case_id:
+            continue
+        if not may_see_case(case):
+            return jsonify({"ok": False,
+                            "error": "That case belongs to someone else."}), 403
+
+        updated, why = record_csat(case, body.get("score"),
+                                   body.get("comment", ""))
+        if updated is None:
+            return jsonify({"ok": False, "error": why}), 400
+
+        save_case(updated)
+        return jsonify({"ok": True, "case_id": case_id,
+                        "csat_score": updated["csat_score"],
+                        "csat_comment": updated["csat_comment"],
+                        "csat_at": updated["csat_at"],
+                        "editable_for_hours": CSAT_EDIT_HOURS})
+
+    return jsonify({"ok": False, "error": f"No case {case_id}."}), 404
+
+
+@app.get("/api/queue")
+@require_role("agent")
+def queue_view():
+    """The work queue, for the console's third column.
+
+    /api/stats already carries a queue, but it is lead-only and the console
+    is an agent's page -- so this exists to widen the audience, NOT to rank
+    anything. The ordering is work_queue()'s, unchanged: one ranking, two
+    callers. A second sort written here would drift from the dashboard's and
+    the two views would disagree about what to pick up next.
+
+    Cases are filtered BEFORE ranking, so an agent's queue holds only what
+    they can actually open. Ranking first and hiding afterwards would leave
+    gaps in the list and a count that disagreed with it.
+    """
+    limit = max(1, min(int(request.args.get("limit", 50)), 200))
+    visible = [case for case in load_cases() if may_see_case(case)]
+
+    result = work_queue(visible, limit=limit)
+    result["ok"] = True
+    result["open_case"] = session.case_id
+    return jsonify(result)
+
+
 @app.get("/api/performance")
 @require_role("lead")
 def performance_view():
     cases = load_cases()
-    return jsonify({"ok": True, **performance(cases),
+    chosen_range = read_range()
+    return jsonify({"ok": True,
+                    "range": chosen_range,
+                    "bucket": RANGES[chosen_range]["bucket"],
+                    **performance(cases, chosen_range),
                     "suggestions": suggestion_quality(cases)})
 
 
@@ -1376,6 +2181,10 @@ def performance_view():
 def stats():
     """Everything the dashboard needs, counted server-side."""
     cases = load_cases()
+    # Only the timeline honours the range. The headline counts stay all-time:
+    # "43 resolved" quietly meaning "43 this week" would be a different number
+    # wearing the same label.
+    chosen_range = read_range()
 
     resolved = [c for c in cases if c.get("status") == "resolved"]
     deflected = [c for c in cases if c.get("status") == "auto_resolved"]
@@ -1384,6 +2193,23 @@ def stats():
 
     def count_by(field, values, source):
         return {v: sum(1 for c in source if c.get(field) == v) for v in values}
+
+    # Who closed what. Only cases that are actually closed have a resolver,
+    # so an open case waiting on a reply cannot quietly count as "AI handled".
+    closed = resolved + deflected
+    by_mode = {m: 0 for m in RESOLUTION_MODES}
+    for case in closed:
+        mode = case.get("resolution_mode") or resolution_mode_for(case)
+        if mode in by_mode:
+            by_mode[mode] += 1
+
+    decided = sum(by_mode.values())
+    # How much of the closed work the split actually describes. A case closed
+    # without an outgoing reply has no resolver, so the three modes cover
+    # fewer cases than "resolved + deflected" -- and presenting the split
+    # without saying so reads as though it covered all of them.
+    eligible_for_mode = len(closed)
+    ai_end_to_end = round(100 * by_mode["ai_autonomous"] / decided) if decided else 0
 
     total_turns = sum(c.get("turns", 0) for c in cases)
     total_calls = sum(c.get("calls", 0) for c in cases)
@@ -1407,16 +2233,31 @@ def stats():
         "pending_by_risk": count_by(
             "escalation_risk", ["low", "medium", "high"], pending
         ),
+        "csat": csat_summary(cases),
+        "csat_by_mode": csat_by_mode(cases),
+        "first_reply": median_first_reply(cases),
+        "categories": category_volume(cases),
+        "by_mode": by_mode,
+        "modes_counted": decided,
+        "modes_eligible": eligible_for_mode,
+        # The headline pair. Human touch rate is the exact inverse, computed
+        # from the same denominator so the two always sum to 100 -- two
+        # independent roundings would sometimes show 61% and 40%.
+        "ai_end_to_end": ai_end_to_end,
+        "human_touch_rate": 100 - ai_end_to_end if decided else 0,
         "sla": sla_summary(cases),
         "work_queue": work_queue(cases),
-        "by_day": daily_counts(cases),
+        "range": chosen_range,
+        "bucket": RANGES[chosen_range]["bucket"],
+        "by_day": timeline(cases, chosen_range),
         "avg_turns": round(total_turns / len(cases), 1) if cases else 0,
         "total_calls": total_calls,
         "open_case": session.case_id,
     })
 
 
-def filter_cases(cases, query="", status="all", risk="all", sentiment="all"):
+def filter_cases(cases, query="", status="all", risk="all", sentiment="all",
+                 mode="all"):
     """Narrow the case list. Every filter defaults to "all" = no filtering.
 
     The search runs over the case id, the key issue AND every message, which
@@ -1433,6 +2274,9 @@ def filter_cases(cases, query="", status="all", risk="all", sentiment="all"):
         if risk != "all" and case.get("escalation_risk") != risk:
             continue
         if sentiment != "all" and case.get("sentiment") != sentiment:
+            continue
+        if mode != "all" and (case.get("resolution_mode")
+                              or resolution_mode_for(case)) != mode:
             continue
 
         if query:
@@ -1456,6 +2300,7 @@ def read_filters():
         "status": request.args.get("status", "all"),
         "risk": request.args.get("risk", "all"),
         "sentiment": request.args.get("sentiment", "all"),
+        "mode": request.args.get("mode", "all"),
     }
 
 
@@ -1802,6 +2647,7 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
     imported = migrate_from_json()
+    backfilled = backfill_resolution_modes()
 
     # Cookie settings and the signing key, then the first admin if the user
     # table is empty. Both need the database, so they come after the migrate.
@@ -1815,10 +2661,12 @@ if __name__ == "__main__":
     print("  AI Support Coach")
     print("  " + "-" * 46)
     print(f"  key file : {key_file or 'NOT FOUND - see gemini_api_key.txt'}")
-    print(f"  model    : {os.getenv('GEMINI_MODEL', 'gemini-3.5-flash')}")
+    print(f"  model    : {os.getenv('GEMINI_MODEL', 'gemini-3.5-flash-lite')}")
     print(f"  store    : sqlite  {os.path.basename(CASES_DB)}")
     if imported:
         print(f"  migrated : {imported} case(s) imported from cases.json")
+    if backfilled:
+        print(f"  backfill : resolution mode set on {backfilled} older case(s)")
     print(f"  cases    : {len(saved)} saved "
           f"({sum(1 for c in saved if c.get('status') == 'resolved')} resolved)")
 
