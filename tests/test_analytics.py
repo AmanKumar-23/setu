@@ -1,5 +1,7 @@
 """The numbers the dashboard puts in front of a human."""
 
+from datetime import datetime, timedelta
+
 import pytest
 
 
@@ -61,19 +63,46 @@ def test_coaching_tips_group_into_themes(srv, case, ago):
     assert "Give a specific timeline" in labels
 
 
-def test_daily_counts_fill_empty_days(srv, case, ago):
+def test_the_timeline_fills_quiet_buckets(srv, case, ago):
     """Dropping quiet days would compress the time axis and make volume look
     steadier than it was."""
-    days = srv.daily_counts([case(opened_at=ago(days=3), status="resolved"),
-                             case(opened_at=ago(days=0), status="pending")])
-    assert len(days) >= 4
+    days = srv.timeline([case(opened_at=ago(days=3), status="resolved"),
+                         case(opened_at=ago(days=0), status="pending")])
+    assert len(days) == 7                 # the default window, gaps and all
     assert sum(d["total"] for d in days) == 2
 
 
-def test_daily_counts_survive_bad_timestamps(srv, case):
-    assert srv.daily_counts([]) == []
-    assert srv.daily_counts([case(opened_at="not-a-date")]) == []
-    assert srv.daily_counts([{"status": "pending"}]) == []
+def test_the_timeline_survives_bad_timestamps(srv, case):
+    assert srv.timeline([]) == []
+    assert srv.timeline([case(opened_at="not-a-date")]) == []
+    assert srv.timeline([{"status": "pending"}]) == []
+
+
+@pytest.mark.parametrize("range_key,size", [
+    ("24h", 24), ("7d", 7), ("14d", 14), ("30d", 30)])
+def test_each_range_returns_its_own_window(srv, case, ago, range_key, size):
+    points = srv.timeline([case(opened_at=ago(minutes=30))], range_key)
+    assert len(points) == size
+
+
+def test_twenty_four_hours_buckets_by_hour(srv, case, ago):
+    """A day split into days is one or two bars, which is not a chart."""
+    points = srv.timeline([case(opened_at=ago(minutes=30))], "24h")
+    assert len({p["at"] for p in points}) == 24
+    # consecutive buckets are an hour apart
+    first, second = (datetime.fromisoformat(p["at"]) for p in points[:2])
+    assert second - first == timedelta(hours=1)
+
+
+def test_a_case_outside_the_window_is_not_counted(srv, case, ago):
+    points = srv.timeline([case(opened_at=ago(days=20))], "7d")
+    assert len(points) == 7               # the window still draws
+    assert sum(p["total"] for p in points) == 0
+
+
+def test_an_unknown_range_falls_back_to_the_default(srv, case, ago):
+    points = srv.timeline([case(opened_at=ago(days=1))], "all-of-time")
+    assert len(points) == 7
 
 
 @pytest.mark.parametrize("kwargs,expected", [

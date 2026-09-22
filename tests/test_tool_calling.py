@@ -60,7 +60,7 @@ def test_function_results_go_back_with_a_role_the_api_accepts(
     """Every turn we build must carry a role the API will accept."""
     seen = []
 
-    def fake_call(contents, config=None, max_attempts=3):
+    def fake_call(contents, config=None, max_attempts=3, operation="generate"):
         # Record the roles of the conversation as it stands on each round.
         seen.append([getattr(c, "role", None) for c in contents])
         # Round 1 asks for a lookup; round 2 is satisfied and asks for nothing.
@@ -92,7 +92,7 @@ def test_the_loop_can_chain_two_lookups(core, coach, back_office, monkeypatch):
     """Round 2 must survive -- that is the whole point of a multi-round loop."""
     rounds = []
 
-    def fake_call(contents, config=None, max_attempts=3):
+    def fake_call(contents, config=None, max_attempts=3, operation="generate"):
         rounds.append(contents)
         if len(rounds) == 1:
             return FakeResponse([FakeCall("check_order_status")])

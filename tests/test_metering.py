@@ -246,3 +246,34 @@ def test_nothing_is_recorded_when_no_hook_is_set(core, meter, monkeypatch):
     monkeypatch.setattr(core, "USAGE_HOOK", None)
     core.report_usage("analyse", "gemini-3.5-flash", object())
     assert meter.spent_today()["calls"] == 0
+
+
+# --------------------------------------------------------------------------
+# The Calls chip counts real API calls
+# --------------------------------------------------------------------------
+def test_the_calls_count_comes_from_metering_not_a_hand_counter(srv, meter):
+    """The header used to show 2 for a turn that really made 7, because the
+    tool-calling loop and the embeddings were never added to the counter."""
+    srv.session.case_id = "SC-COUNT"
+    meter.bill_to("SC-COUNT")
+    for operation in ("analyse", "generate", "generate", "generate",
+                      "embed", "embed", "draft"):
+        meter.record({"operation": operation, "model": "m",
+                      "prompt": 10, "output": 5, "cached": 0})
+
+    assert srv.session.real_calls() == 7
+    assert srv.session.as_dict()["calls"] == 7
+
+
+def test_a_case_with_no_metered_calls_keeps_what_it_stored(srv, meter):
+    """Cases saved before metering existed have no usage rows; rewriting them
+    to zero would erase history rather than correct it."""
+    srv.session.case_id = "SC-OLD"
+    srv.session.calls = 4
+    assert srv.session.real_calls() == 4
+
+
+def test_a_case_that_has_not_been_saved_yet_falls_back(srv):
+    srv.session.case_id = None
+    srv.session.calls = 2
+    assert srv.session.real_calls() == 2
