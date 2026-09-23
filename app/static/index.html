@@ -194,6 +194,12 @@ body{
 .step.now.high .node{box-shadow:0 0 0 5px rgba(214,56,47,.13)}
 .step .tlabel{font-size:11px;font-weight:700;color:var(--ink-3);letter-spacing:.05em;
   text-transform:uppercase}
+.gloss{margin-top:5px;font-size:12px;line-height:1.55;color:var(--ink-3);
+  font-style:italic}
+.gloss .gtag{display:inline-block;margin-right:7px;padding:1px 6px;border-radius:5px;
+  border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink-3);
+  font-size:9.5px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;
+  font-style:normal;vertical-align:1px}
 .step .msg{font-size:12.5px;color:var(--ink-2);margin-top:3px;line-height:1.5;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .step .badge{margin-top:6px}
@@ -839,6 +845,7 @@ let lastHistory = [];
 function renderStream(history){
   const box = $("stream");
   lastHistory = history || [];
+  // (the gloss for any foreign line is fetched once the bubbles exist)
   history = lastHistory;
   if(!history.length){
     box.innerHTML = `<div class="empty">
@@ -877,6 +884,7 @@ function renderStream(history){
     }
   });
   paintSpeakButtons();
+  glossForeign(box, history);
   box.scrollTop = box.scrollHeight;
 }
 
@@ -1021,6 +1029,7 @@ function renderIntel(s){
   paintGateState(s.allow_writes);
   $("callChip").textContent = s.calls;
   $("caseChip").textContent = s.case_id || "—";
+  CURRENT_CASE = s.case_id || "";
   renderCalls(s.facts);
   if(s.model) $("modelChip").textContent = s.model;
   renderTracker(s);
@@ -1365,6 +1374,44 @@ function stopSpeaking(){
   if(Speech){ try{ Speech.cancel(); }catch(e){} }
   speakingId = null;
   paintSpeakButtons();
+}
+
+/* An English gloss under a customer message written in another script.
+   UNDER it, never instead of it -- the agent should read what the customer
+   actually wrote, in their own words, and have the English to lean on. The
+   server caches each gloss on the message, so reopening a case is free. */
+let CURRENT_CASE = "";
+
+async function glossForeign(box, history){
+  if(!(history || []).some(m => m.foreign)) return;
+
+  // Every caller paints the transcript first and the case chip second, so at
+  // this point CURRENT_CASE still holds the previous case, or nothing at all.
+  // Yield once and let the rest of that repaint finish before asking.
+  await new Promise(done => setTimeout(done, 0));
+  const caseId = CURRENT_CASE;
+  if(!caseId) return;
+
+  let d;
+  try{
+    d = await (await fetch(`/api/cases/${caseId}/gloss`,
+                           {method: "POST"})).json();
+  }catch(e){ return; }
+  if(!d || !d.ok || !d.glosses) return;
+
+  const turns = [...box.querySelectorAll(".turn")];
+  Object.keys(d.glosses).forEach(i => {
+    const turn = turns[Number(i)];
+    if(!turn || turn.querySelector(".gloss")) return;
+    const line = document.createElement("div");
+    line.className = "gloss";
+    const tag = document.createElement("span");
+    tag.className = "gtag";
+    tag.textContent = "English";
+    line.appendChild(tag);
+    line.appendChild(document.createTextNode(d.glosses[i]));
+    turn.appendChild(line);
+  });
 }
 
 function paintSpeakButtons(){

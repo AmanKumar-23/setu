@@ -680,7 +680,11 @@ class LiveSession:
                 {"speaker": m.speaker, "text": m.text,
                  "source": getattr(m, "source", "human"),
                  "channel": getattr(m, "channel", "typed"),
-                 "author": getattr(m, "author", "")}
+                 "author": getattr(m, "author", ""),
+                 # Carried through the save so a case that is opened, worked
+                 # on and saved again does not throw away a translation we
+                 # have already paid for.
+                 "gloss_en": getattr(m, "gloss_en", "")}
                 for m in self.state.history
             ],
         }
@@ -778,7 +782,8 @@ class LiveSession:
                                    message.get("text", ""),
                                    message.get("source", "human"),
                                    message.get("channel", "typed"),
-                                   message.get("author", ""))
+                                   message.get("author", ""),
+                                   message.get("gloss_en", ""))
 
         # The agent replies to the last thing the CUSTOMER said, which is not
         # necessarily the last line of the transcript.
@@ -806,7 +811,12 @@ class LiveSession:
             "history": [
                 {"speaker": m.speaker, "text": m.text,
                  "channel": getattr(m, "channel", "typed"),
-                 "source": getattr(m, "source", "human")}
+                 "source": getattr(m, "source", "human"),
+                 "author": getattr(m, "author", ""),
+                 # non-English customer text the agent may need glossed
+                 "foreign": (m.speaker == "customer"
+                             and languages.detect_language(m.text)
+                             not in (None, "en"))}
                 for m in self.state.history
             ],
             "sentiment": self.state.sentiment,
@@ -2590,6 +2600,59 @@ def rate_case(case_id):
                         "csat_comment": updated["csat_comment"],
                         "csat_at": updated["csat_at"],
                         "editable_for_hours": CSAT_EDIT_HOURS})
+
+    return jsonify({"ok": False, "error": f"No case {case_id}."}), 404
+
+
+@app.post("/api/cases/<case_id>/gloss")
+@require_role("agent")
+def case_gloss(case_id):
+    """Plain English for a customer message written in another script.
+
+    The ONLY multilingual thing on the agent side. Shown UNDER the original,
+    never instead of it -- the agent should see what the customer actually
+    wrote. Cached on the message, so a case costs one call however many times
+    it is opened, and metered as its own "translate" step because it is a
+    real extra call the Cost page should not hide inside the draft.
+    """
+    for case in load_cases():
+        if case.get("id") != case_id:
+            continue
+        if not may_see_case(case):
+            return jsonify({"ok": False,
+                            "error": "That case belongs to another agent."}), 403
+
+        glosses, changed = {}, False
+        for index, message in enumerate(case.get("messages", [])):
+            if message.get("speaker") != "customer":
+                continue
+            text = message.get("text", "")
+            if languages.detect_language(text) in (None, "en"):
+                continue        # already readable
+
+            if message.get("gloss_en"):
+                glosses[index] = message["gloss_en"]
+                continue
+
+            try:
+                english = session.coach.translate_for_agent(text)
+            except Exception:
+                continue        # a failed gloss must not break the case view
+            message["gloss_en"] = english
+            glosses[index] = english
+            changed = True
+
+        if changed:
+            save_case(case)
+            # If this is the case the console has open, the live session holds
+            # its own copy of the transcript and will write it back on the next
+            # persist(). Put the gloss there too, or the save we just made is
+            # undone by the agent's very next message.
+            if session.case_id == case_id:
+                for index, english in glosses.items():
+                    if index < len(session.state.history):
+                        session.state.history[index].gloss_en = english
+        return jsonify({"ok": True, "glosses": glosses})
 
     return jsonify({"ok": False, "error": f"No case {case_id}."}), 404
 
