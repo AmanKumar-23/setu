@@ -529,6 +529,25 @@ def record_proposals(session):
                         reason=session.state.key_issue or None)
 
 
+def claiming_username():
+    """Who, if anyone, should be recorded as the OWNER of the case in hand.
+
+    "Owner" means the agent working it, and only an agent can be one. The
+    portal runs the same pipeline signed in as the CUSTOMER, so without this
+    every ticket a customer raised would be stamped with their own name --
+    and may_see_case() would then hide it from every agent, because the owner
+    is neither empty nor theirs. The ticket would be raised and instantly
+    unreachable.
+    """
+    who = signed_in_username()      # None outside a request, as in the tests
+    if who is None:
+        return None
+    try:
+        return who if current_user.at_least("agent") else None
+    except (RuntimeError, AttributeError):
+        return None
+
+
 def may_see_case(case):
     """Whether the signed-in user is allowed to open this one case.
 
@@ -670,7 +689,7 @@ class LiveSession:
             self.case_id = next_case_id(cases)
             self.opened_at = now_iso()
             if self.owner is None:
-                self.owner = signed_in_username()
+                self.owner = claiming_username()
 
         # Whatever this request spends from here on belongs to this case.
         metering.bill_to(self.case_id)
@@ -724,7 +743,7 @@ class LiveSession:
         # An unowned case -- one from before accounts existed -- is claimed by
         # whoever opens it. Otherwise those cases would belong to nobody and
         # no agent could ever pick them up again.
-        self.owner = case.get("owner") or signed_in_username()
+        self.owner = case.get("owner") or claiming_username()
         self.customer = case.get("customer")
         self.subject = case.get("subject") or ""
         self.category = case.get("category") or ""

@@ -245,3 +245,45 @@ def test_a_rating_reaches_the_dashboard_numbers(client, tickets, srv):
     summary = srv.csat_summary(srv.load_cases())
     assert summary["count"] == 1
     assert summary["average"] == 4.0
+
+
+# ------------------------------------------------------------------ ownership
+
+def test_a_ticket_a_customer_raised_has_no_agent_owner(srv, client, monkeypatch):
+    """"Owner" means the agent working the case, and only an agent can be one.
+
+    The portal runs the same pipeline signed in as the customer. If persist()
+    claimed ownership for whoever is signed in, every ticket would be stamped
+    with the customer's own name -- and may_see_case() would then hide it from
+    every agent, because that owner is neither empty nor theirs. The ticket
+    would be raised and instantly unreachable.
+    """
+    cls = srv.coach_core.AICoach
+    monkeypatch.setattr(cls, "analyze_customer_message",
+                        lambda self, text, history=None: {
+                            "sentiment": "negative", "urgency": "high",
+                            "escalation_risk": "high", "key_issue": "recharge",
+                            "frustration": 70, "trend": "rising",
+                            "emotion": "Frustrated", "intent": "Refund request",
+                            "intent_confidence": 0.8})
+    monkeypatch.setattr(cls, "suggest_reply",
+                        lambda self, text, history, analysis=None, facts=None,
+                        language_note="": "We are on it.")
+    monkeypatch.setattr(cls, "gather_facts",
+                        lambda self, text, history, allow_writes=False: [])
+
+    sign_in(client, "priya", "customer-pw")
+    d = client.post("/api/portal/tickets",
+                    json={"subject": "Recharge", "category": "Recharge",
+                          "description": "recharge failed"}).get_json()
+    raised = next(c for c in srv.load_cases() if c["id"] == d["ticket"]["id"])
+    assert raised["customer"] == "priya"
+    assert raised["owner"] is None
+
+
+def test_an_unowned_customer_ticket_is_visible_to_an_agent(srv, client, case):
+    """The other half of the same rule: unowned means anyone may pick it up."""
+    srv.save_case(case(id="SC-UNOWNED", customer="priya", owner=None,
+                       status="escalated"))
+    sign_in(client, "rahul", "agent-pwxx")
+    assert client.post("/api/open-case", json={"id": "SC-UNOWNED"}).status_code == 200
