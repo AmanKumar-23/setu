@@ -14,7 +14,7 @@ def client(srv):
     import auth
     auth.harden(srv.app, local_only=True)
     srv.app.config["TESTING"] = True
-    auth.create_user("ravi", "lead-password", "lead")
+    auth.create_user("ravi", "lead-password", "admin")
     c = srv.app.test_client()
     c.post("/api/login", json={"username": "ravi", "password": "lead-password"})
     return c

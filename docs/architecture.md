@@ -176,12 +176,21 @@ only decorates.
 ### Roles are ranked, not enumerated
 
 ```
-agent  (1)  ──►  lead  (2)  ──►  admin  (3)
+customer (0)      agent (1)  ──►  admin (2)
+   │                                  
+   └── its own workspace, off the staff ladder entirely
 ```
 
-Each role is a superset of the one below, so a guard asks "at least `lead`?" rather than "in this
-set of roles?". A set would let someone hold `admin` without holding `lead`, and every check
-would have to remember to list both. Ranking makes that gap unrepresentable.
+Among STAFF, each role is a superset of the one below, so a guard asks "at least `agent`?"
+rather than "in this set of roles?". A set would let someone hold `admin` without holding
+`agent`, and every check would have to remember to list both. Ranking makes that gap
+unrepresentable.
+
+A customer is **not** the bottom of that ladder. They are a different audience who must be kept
+out of the console, not let in with fewer buttons. Rank 0 is what makes every staff guard
+exclude them without one of those guards being edited — and `/portal` is guarded by
+`require_exact("customer")` rather than a floor, because a floor would let an admin, who
+outranks a customer, wander into the customer's workspace.
 
 The whole policy is one dict in `server.py` — sixteen routes, each with the role it needs —
 rather than a decorator argument scattered down nine hundred lines. It can be read, and audited,

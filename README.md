@@ -61,7 +61,7 @@ As a conversation happens, every customer turn is analysed and every agent turn 
 | ⚡ **Auto-resolution** | A confident KB match (≥ `0.65`) on a low-risk case answers the customer directly and closes it. |
 | ⏱️ **SLA tracking** | Targets that vary by risk — high 15 min, medium 1 h, low 4 h — with a "breaching soon" panel. |
 | 🎙️ **Voice input** | Browser speech recognition, English or Hindi. No extra service, no extra cost. |
-| 🔐 **Accounts and roles** | Transcripts sit behind a login. `agent` gets the console and their own cases, `lead` adds the dashboard and the write-action gate, `admin` adds the exports. |
+| 🔐 **Three roles, three workspaces** | `customer` raises and tracks tickets in **/portal**, `agent` works escalated cases in the **console**, `admin` adds the **dashboard**, the write-action gate and the exports. A wrong turn returns you to your own workspace, never a 403. |
 | 💰 **Cost metering** | Every call's token count comes from the API itself, attributed to a case, an agent and a step — so you know what a conversation cost, and which step spent it. Daily token and spend caps refuse new work rather than running up a bill. |
 
 ### The dashboard
@@ -179,9 +179,9 @@ one below it:
 
 | Role | Can reach |
 |---|---|
+| `customer` | **/portal** — their own tickets, and nothing else. Not a junior agent: a different audience, kept out of the console entirely |
 | `agent` | The console, and the cases they own or claim |
-| `lead` | Everything an agent has, plus the dashboard and the **write-action gate** — deciding a refund may actually be issued |
-| `admin` | Everything a lead has, plus the bulk exports and account management |
+| `admin` | Everything an agent has, plus the dashboard, the **write-action gate** — deciding a refund may actually be issued — the bulk exports and account management |
 
 Accounts are created from the command line, never through the web app — an app
 that can mint its own admin does not really have roles.

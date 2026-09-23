@@ -6,16 +6,22 @@ product whose whole pitch includes masking personal data before it leaves the
 machine: there is little point hiding a phone number from Google if the page
 showing it is open to the internet.
 
-Three roles, in increasing order of what they can reach:
+Three roles, and three workspaces:
 
-    agent   the console, and the cases they own
-    lead    everything an agent has, plus the dashboard and the write-action
-            gate -- deciding that a refund may actually be issued
-    admin   everything a lead has, plus the bulk exports
+    customer  raises and tracks their own tickets, in /portal
+    agent     handles escalated cases, in the console at /
+    admin     everything an agent has, plus the dashboard, the write-action
+              gate -- deciding a refund may actually be issued -- and exports
 
-The ordering is deliberate. Each role is a superset of the one below it, so a
-check is "at least this role" rather than a set membership test, and there is
-no way to hold a permission without holding the lesser ones it implies.
+The STAFF ordering is deliberate: admin is a superset of agent, so a check is
+"at least this role" rather than a set membership test, and there is no way to
+hold a permission without holding the lesser ones it implies.
+
+Customer is NOT part of that ladder. A customer is not a junior agent -- they
+are a different audience who must be kept OUT of the console, not let in with
+fewer buttons. They sit at rank 0, which is what makes every staff guard
+exclude them for free, and /portal is guarded by require_exact() rather than a
+floor so that staff do not land in the customer's workspace either.
 
 Passwords are stored as scrypt hashes by way of werkzeug, which ships with
 Flask -- no new dependency, and no home-made cryptography.
@@ -33,18 +39,24 @@ from werkzeug.security import check_password_hash, generate_password_hash
 # --------------------------------------------------------------------------
 # Roles
 # --------------------------------------------------------------------------
-ROLES = ("agent", "lead", "admin")
+ROLES = ("customer", "agent", "admin")
 
 # Rank, not a permission set: "lead or better" is the question every check
 # actually asks, and expressing it as a number makes an accidental gap in the
 # hierarchy impossible.
-RANK = {"agent": 1, "lead": 2, "admin": 3}
+# Rank 0 for customer: below every staff role, so at_least("agent") is
+# already False for them and the staff guards needed no edits at all.
+RANK = {"customer": 0, "agent": 1, "admin": 2}
 
 ROLE_SUMMARY = {
-    "agent": "console, and the cases they own",
-    "lead":  "agent, plus the dashboard and the write-action gate",
-    "admin": "lead, plus bulk exports and account management",
+    "customer": "their own tickets, in the portal",
+    "agent":    "the console, and the cases they own",
+    "admin":    "agent, plus the dashboard, the write-action gate and exports",
 }
+
+# Where each role belongs when it signs in, and where a wrong turn sends it
+# back to. There is no 403 page: you are returned to your own workspace.
+LANDING = {"customer": "/portal", "agent": "/", "admin": "/dashboard"}
 
 # Five wrong passwords parks the account for fifteen minutes. Enough to make
 # guessing pointless, short enough that a locked-out agent on a shift is not
@@ -60,6 +72,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT UNIQUE NOT NULL,
+    email         TEXT,
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL,
     display_name  TEXT,
@@ -103,9 +116,36 @@ def connect():
     return _connect()
 
 
+# CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so
+# a database made before email existed needs the column adding by hand.
+USER_MIGRATIONS = [
+    ("email", "ALTER TABLE users ADD COLUMN email TEXT"),
+]
+
+
+def apply_migrations(conn):
+    """Add columns an older database is missing, then index them.
+
+    The index is created HERE rather than in SCHEMA because on an existing
+    database CREATE TABLE IF NOT EXISTS does nothing, so an index declared
+    alongside it would reference a column that has not been added yet.
+    """
+    have = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if not have:
+        return                      # no users table yet; SCHEMA makes it
+
+    for column, statement in USER_MIGRATIONS:
+        if column not in have:
+            conn.execute(statement)
+
+    conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS users_email
+                    ON users(email) WHERE email IS NOT NULL""")
+
+
 def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
+        apply_migrations(conn)
 
 
 def now_iso():
@@ -121,6 +161,12 @@ class User(UserMixin):
         self.username = row["username"]
         self.role = row["role"]
         self.display_name = row["display_name"] or row["username"]
+        # sqlite3.Row raises rather than returning None for a column that is
+        # not in the result, and `in row` would test its VALUES, not its keys.
+        try:
+            self.email = row["email"]
+        except (IndexError, KeyError):
+            self.email = None      # a row from a database not yet migrated
         self.active = bool(row["active"])
         self.last_login_at = row["last_login_at"]
 
@@ -131,15 +177,27 @@ class User(UserMixin):
         return self.active
 
     def at_least(self, role):
-        return RANK.get(self.role, 0) >= RANK[role]
+        # -1 for an unknown role, not 0 -- a role we do not recognise must
+        # rank BELOW customer rather than level with it.
+        return RANK.get(self.role, -1) >= RANK[role]
+
+    @property
+    def landing(self):
+        """Where this user belongs, and where a wrong turn returns them."""
+        return LANDING.get(self.role, "/")
 
     def as_dict(self):
         return {
             "username": self.username,
             "role": self.role,
             "display_name": self.display_name,
-            "can_see_dashboard": self.at_least("lead"),
-            "can_allow_writes": self.at_least("lead"),
+            "email": self.email,
+            "landing": self.landing,
+            "is_customer": self.role == "customer",
+            # All four moved up from lead, which no longer exists. Approving a
+            # refund is an admin's call now.
+            "can_see_dashboard": self.at_least("admin"),
+            "can_allow_writes": self.at_least("admin"),
             "can_export": self.at_least("admin"),
             "can_manage_users": self.at_least("admin"),
         }
@@ -178,15 +236,22 @@ def list_users():
     ]
 
 
-def find_user(username):
+def find_user(handle):
+    """Look somebody up by email OR username.
+
+    The login page asks for an email, but --add-user still creates accounts
+    by username and the test suite signs in with one, so both have to work.
+    """
+    handle = str(handle or "").strip().lower()
+    if not handle:
+        return None
     with connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM users WHERE username = ?",
-            (str(username).strip().lower(),)).fetchone()
-    return row
+        return conn.execute(
+            "SELECT * FROM users WHERE username = ? OR lower(email) = ?",
+            (handle, handle)).fetchone()
 
 
-def create_user(username, password, role, display_name=None):
+def create_user(username, password, role, display_name=None, email=None):
     """Add an account. Raises ValueError on anything the caller got wrong."""
     username = str(username).strip().lower()
 
@@ -199,15 +264,43 @@ def create_user(username, password, role, display_name=None):
     if find_user(username):
         raise ValueError(f"User {username!r} already exists.")
 
+    email = (email or "").strip().lower() or None
+    if email and find_user(email):
+        raise ValueError(f"{email} is already on another account.")
+
     with connect() as conn:
         conn.execute("""
-            INSERT INTO users (username, password_hash, role, display_name,
-                               active, created_at)
-            VALUES (?, ?, ?, ?, 1, ?)
-        """, (username, generate_password_hash(password), role,
+            INSERT INTO users (username, email, password_hash, role,
+                               display_name, active, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+        """, (username, email, generate_password_hash(password), role,
               display_name or username.title(), now_iso()))
 
     return username
+
+
+def set_role(username, role):
+    """Move an existing account to another role."""
+    if role not in ROLES:
+        raise ValueError(f"Role must be one of: {', '.join(ROLES)}.")
+    if not find_user(username):
+        raise ValueError(f"No user {username!r}.")
+    with connect() as conn:
+        conn.execute("UPDATE users SET role = ? WHERE username = ?",
+                     (role, str(username).strip().lower()))
+
+
+def set_email(username, email):
+    """Give an existing account an email address to sign in with."""
+    email = (email or "").strip().lower() or None
+    existing = find_user(email) if email else None
+    if existing and existing["username"] != str(username).strip().lower():
+        raise ValueError(f"{email} is already on another account.")
+    if not find_user(username):
+        raise ValueError(f"No user {username!r}.")
+    with connect() as conn:
+        conn.execute("UPDATE users SET email = ? WHERE username = ?",
+                     (email, str(username).strip().lower()))
 
 
 def set_password(username, password):
@@ -315,12 +408,44 @@ def _denied(message, status):
                         "auth": "required" if status == 401 else "forbidden"}), status
     if status == 401:
         return redirect("/login?next=" + request.path)
-    return redirect("/denied")
+
+    # A page this role cannot open sends them to their OWN workspace rather
+    # than to a dead end. Telling a customer they lack a permission they were
+    # never going to be given is a worse answer than simply taking them home.
+    try:
+        return redirect(current_user.landing)
+    except AttributeError:
+        return redirect("/login")
 
 
 @login_manager.unauthorized_handler
 def unauthorized():
     return _denied("Sign in to continue.", 401)
+
+
+def require_exact(*allowed):
+    """Decorator: this route needs one of exactly these roles.
+
+    require_role() is a FLOOR, and a floor is wrong for /portal: admin
+    outranks customer, so "at least customer" would let staff into the
+    customer's workspace. Audience, not seniority, so membership not rank.
+    """
+    def decorate(view):
+        from functools import wraps
+
+        @wraps(view)
+        def guarded(*args, **kwargs):
+            if not current_user.is_authenticated:
+                return _denied("Sign in to continue.", 401)
+            if current_user.role not in allowed:
+                return _denied(
+                    f"This is for {' or '.join(allowed)}. You are signed in "
+                    f"as {current_user.role}.", 403)
+            return view(*args, **kwargs)
+
+        return guarded
+
+    return decorate
 
 
 def require_role(minimum):
@@ -419,5 +544,30 @@ def ensure_seed_admin():
         # Readable enough to retype from a terminal, random enough to keep.
         password = secrets.token_urlsafe(12)
 
-    create_user(username, password, "admin", display_name="Administrator")
+    create_user(username, password, "admin", display_name="Administrator",
+                email=os.getenv("ADMIN_EMAIL", "admin@support-coach.local"))
     return (username, password if generated else None)
+
+
+# The three accounts the login page's demo buttons sign in as. Created only
+# when an account of that role does not already exist, so running this twice
+# does nothing and an account somebody renamed is left alone.
+DEMO_USERS = [
+    ("priya", "Priya Sharma", "customer", "priya@support-coach.local"),
+    ("rahul", "Rahul Verma",  "agent",    "rahul@support-coach.local"),
+]
+
+
+def ensure_demo_users(password):
+    """Seed the customer and agent the demo buttons expect.
+
+    Returns the usernames it created. The admin comes from
+    ensure_seed_admin(), which runs first and owns the generated password.
+    """
+    made = []
+    for username, display, role, email in DEMO_USERS:
+        if find_user(username):
+            continue
+        create_user(username, password, role, display_name=display, email=email)
+        made.append(username)
+    return made

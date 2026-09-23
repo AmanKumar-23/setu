@@ -1,8 +1,10 @@
 """Self-service sign-up from the login page.
 
-The one thing these exist to defend: a form cannot hand anybody a role. The
-console is as far as sign-up goes, and the dashboard, the write-action gate
-and the exports stay behind an account somebody made deliberately.
+The one thing these exist to defend: a form cannot hand anybody a role.
+Sign-up makes a CUSTOMER -- somebody who finds the login page and makes an
+account is a person with a problem, not a member of staff -- so the console,
+the dashboard, the write-action gate and the exports all stay behind an
+account somebody made deliberately with --add-user.
 """
 
 import pytest
@@ -13,7 +15,7 @@ def client(srv):
     import auth
     auth.harden(srv.app, local_only=True)
     srv.app.config["TESTING"] = True
-    auth.create_user("ravi", "lead-password", "lead")
+    auth.create_user("ravi", "lead-password", "admin")
     return srv.app.test_client()
 
 
@@ -27,31 +29,32 @@ def signup(client, **over):
 # --------------------------------------------------------------------------
 # The role floor
 # --------------------------------------------------------------------------
-def test_a_new_account_is_an_agent(client):
+def test_a_new_account_is_a_customer(client):
     body = signup(client).get_json()
     assert body["ok"] is True
-    assert body["user"]["role"] == "agent"
+    assert body["user"]["role"] == "customer"
 
 
 def test_a_smuggled_role_is_ignored(client):
     """Sending role=admin in the payload must change nothing."""
     body = signup(client, username="sneaky", role="admin").get_json()
-    assert body["user"]["role"] == "agent"
+    assert body["user"]["role"] == "customer"
     assert body["user"]["can_see_dashboard"] is False
     assert body["user"]["can_export"] is False
     assert body["user"]["can_manage_users"] is False
 
 
-def test_a_new_account_cannot_reach_the_dashboard(client):
+def test_a_new_account_reaches_only_the_portal(client):
     signup(client, username="fresh")
     assert client.get("/api/stats").status_code == 403
     assert client.get("/api/cases.csv").status_code == 403
-    assert client.get("/").status_code == 200        # the console is theirs
+    assert client.get("/api/queue").status_code == 403     # not the console
+    assert client.get("/portal").status_code == 200        # their own workspace
 
 
-def test_signing_up_signs_you_in_and_lands_on_the_console(client):
+def test_signing_up_signs_you_in_and_lands_on_the_portal(client):
     body = signup(client, username="lands").get_json()
-    assert body["next"] == "/"
+    assert body["next"] == "/portal"
     assert client.get("/api/me").get_json()["user"]["username"] == "lands"
 
 

@@ -705,14 +705,11 @@ textarea::placeholder{color:var(--ink-3)}
 <div class="dock">
   <div class="dockcard">
     <div id="quickWrap" hidden>
-      <div class="quicklabel">Common issues — click to fill</div>
+      <div class="quicklabel">Common issues — click to start your reply</div>
       <div class="quick" id="quick"></div>
     </div>
     <div class="dockrow">
-      <div class="seg" role="tablist">
-        <button role="tab" id="tabCustomer" aria-selected="true">Customer</button>
-        <button role="tab" id="tabAgent" aria-selected="false">Agent</button>
-      </div>
+      <span class="cost" id="asWho">Replying as —</span>
       <span class="cost" id="costHint">analyses, looks up and drafts a reply</span>
       <label class="approve" data-needs="allow_writes" hidden
              title="Lets the coach PROPOSE refunds, expedites and access resets. It can never carry one out -- every proposal waits for you to approve it.">
@@ -729,12 +726,12 @@ textarea::placeholder{color:var(--ink-3)}
       </span>
       <div class="grow"></div>
       <span class="cost"><span class="kbd">⌘</span> <span class="kbd">↵</span> send
-        &nbsp;·&nbsp; <span class="kbd">tab</span> switch</span>
+        &nbsp;·&nbsp; </span>
     </div>
     <div class="inputrow">
       <div class="inputwrap" id="inputWrap">
         <div class="ghost" id="ghost" aria-hidden="true" hidden></div>
-        <textarea id="input" rows="1" placeholder="Type what the customer just said…"></textarea>
+        <textarea id="input" rows="1" placeholder="Reply to the customer…"></textarea>
       </div>
       <button class="mic" id="micBtn" aria-pressed="false" title="Speak instead of typing"
               aria-label="Speak instead of typing">🎤</button>
@@ -773,6 +770,8 @@ async function loadMe(){
   document.getElementById("meAv").textContent =
     (u.display_name || u.username).trim()[0].toUpperCase();
   document.getElementById("me").hidden = false;
+  // The composer says whose reply it is, using the signed-in agent's name.
+  setComposerFor(u.display_name || u.username);
 
   // Never show a control the role cannot use -- a button that only ever
   // returns 403 is worse than no button.
@@ -787,7 +786,12 @@ document.getElementById("signOut").onclick = async () => {
   location.href = "/login";
 };
 
-let speaker = "customer", busy = false;
+// The console is the AGENT's workspace now; customers have their own. What
+// you type is always an agent reply. send() still takes a speaker because
+// "Load demo" replays both sides of a saved conversation programmatically --
+// that is a scripted replay, not the console pretending to be a customer.
+const speaker = "agent";
+let busy = false;
 
 const DEMO = [
   ["customer", "hello, mera recharge nahi hua but paise cut gaye"],
@@ -1187,18 +1191,12 @@ async function send(text, who){
 }
 
 /* ---------------- wiring ---------------- */
-function setSpeaker(next){
-  speaker = next;
-  $("tabCustomer").setAttribute("aria-selected", next === "customer");
-  $("tabAgent").setAttribute("aria-selected", next === "agent");
-  $("input").placeholder = next === "customer"
-    ? "Type what the customer just said…" : "Type the agent's reply…";
-  $("costHint").textContent = next === "customer"
-    ? "analyses, looks up and drafts a reply"
-    : "scores your reply and redrafts it";
+// Named for whoever is signed in, so the box says whose words these are.
+function setComposerFor(name){
+  $("input").placeholder = `Reply to the customer as ${name}…`;
+  $("asWho").textContent = `Replying as ${name}`;
+  $("costHint").textContent = "scores your reply and redrafts it";
 }
-$("tabCustomer").onclick = () => setSpeaker("customer");
-$("tabAgent").onclick = () => setSpeaker("agent");
 
 const input = $("input");
 input.addEventListener("input", () => {
@@ -1215,9 +1213,7 @@ input.addEventListener("input", () => {
 });
 input.addEventListener("keydown", e => {
   if(e.key === "Enter" && (e.metaKey || e.ctrlKey)){ e.preventDefault(); fire(); }
-  if(e.key === "Tab" && !e.shiftKey){
-    e.preventDefault(); setSpeaker(speaker === "customer" ? "agent" : "customer");
-  }
+
 });
 function fire(){
   const text = input.value;
@@ -1233,7 +1229,6 @@ $("sendBtn").onclick = fire;
 let usedSuggestion = false;
 
 $("useBtn").onclick = () => {
-  setSpeaker("agent");
   input.value = $("suggestion").textContent;
   usedSuggestion = true;
   input.focus(); input.dispatchEvent(new Event("input"));
@@ -1330,12 +1325,12 @@ function toast_ok(title, message){
 }
 $("seedBtn").onclick = async () => {
   if(busy) return;
+  // Replays a saved conversation, both sides, so the pipeline can be shown
+  // end to end without a customer portal to drive it from.
   for(const [who, text] of DEMO){
-    setSpeaker(who);
     await send(text, who);
     await new Promise(r => setTimeout(r, 400));
   }
-  setSpeaker("customer");
 };
 
 /* ---------------- speaking a reply ----------------
@@ -1852,8 +1847,8 @@ function renderQuick(){
 }
 
 function useFaq(faq){
-  // A customer question, so switch the composer to Customer for them.
-  setSpeaker("customer");
+  // The chips are starting points for the AGENT's reply now, not customer
+  // messages -- customers write their own, in their own workspace.
   input.value = faq.text;
   input.dispatchEvent(new Event("input"));
   input.focus();

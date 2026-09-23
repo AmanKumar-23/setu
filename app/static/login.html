@@ -145,6 +145,33 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14p
   box-shadow:0 4px 14px rgba(239,78,43,.34)}
 .crest .wm{font-size:15.5px;font-weight:700;letter-spacing:-.02em}
 
+/* ---------- role cards ---------- */
+.rolelab{font-size:10.5px;font-weight:700;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:9px}
+.roles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px}
+.role{border:1px solid var(--line-2);border-radius:13px;background:var(--surface);
+  padding:12px 10px;cursor:pointer;text-align:left;font-family:var(--sans);
+  transition:.15s}
+.role:hover{border-color:#F0A88F;background:var(--surface-2)}
+.role .ri{font-size:17px;line-height:1;margin-bottom:7px;display:block}
+.role .rn{font-size:12.5px;font-weight:750;color:var(--ink);letter-spacing:-.01em}
+.role .rd{font-size:10.5px;color:var(--ink-3);line-height:1.45;margin-top:3px}
+.role[aria-pressed="true"]{border-color:var(--brand);background:var(--brand-bg);
+  box-shadow:0 0 0 3px rgba(239,78,43,.1)}
+.role[aria-pressed="true"] .rn{color:var(--brand-600)}
+
+/* ---------- demo buttons ---------- */
+.demos{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:18px;
+  border-bottom:1px solid var(--line)}
+.demo{flex:1;min-width:104px;height:32px;padding:0 10px;border-radius:9px;
+  border:1px dashed var(--line-2);background:var(--surface-2);color:var(--ink-2);
+  font-size:11.5px;font-weight:650;cursor:pointer;font-family:var(--sans);
+  transition:.15s}
+.demo:hover{border-color:var(--brand);border-style:solid;color:var(--brand);
+  background:var(--brand-bg)}
+.demolab{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:8px}
+
 .modes{display:inline-flex;gap:3px;background:var(--surface-3);
   border:1px solid var(--line);border-radius:10px;padding:3px;margin-bottom:20px}
 .modes button{height:30px;padding:0 15px;border:0;border-radius:7px;
@@ -319,6 +346,34 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
         <span class="ic">⚠</span><span id="errText"></span>
       </div>
 
+      <div class="signin-only" id="roleBlock">
+        <div class="rolelab">Sign in as</div>
+        <div class="roles" id="roles" role="group" aria-label="Sign in as">
+          <button type="button" class="role" data-role="customer" aria-pressed="false">
+            <span class="ri">🎫</span>
+            <span class="rn">Customer</span>
+            <span class="rd">Raise and track tickets</span>
+          </button>
+          <button type="button" class="role" data-role="agent" aria-pressed="false">
+            <span class="ri">🎧</span>
+            <span class="rn">Agent</span>
+            <span class="rd">Handle escalated cases</span>
+          </button>
+          <button type="button" class="role" data-role="admin" aria-pressed="false">
+            <span class="ri">📊</span>
+            <span class="rn">Admin</span>
+            <span class="rd">Full dashboard and settings</span>
+          </button>
+        </div>
+
+        <div class="demolab">Demo accounts — one click, no typing</div>
+        <div class="demos" id="demos">
+          <button type="button" class="demo" data-demo="customer">Priya (Customer)</button>
+          <button type="button" class="demo" data-demo="agent">Rahul (Agent)</button>
+          <button type="button" class="demo" data-demo="admin">Admin</button>
+        </div>
+      </div>
+
       <div class="field signup-only" id="fDisplay" hidden>
         <label for="display">Your name <span style="color:var(--ink-3);font-weight:500">(optional)</span></label>
         <div class="wrap">
@@ -329,12 +384,21 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
       </div>
 
       <div class="field">
+        <label for="email">Email</label>
+        <div class="wrap">
+          <svg class="pre" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg>
+          <input id="email" name="email" type="email" autocomplete="username"
+                 autocapitalize="none" spellcheck="false"
+                 placeholder="priya@support-coach.local" required autofocus>
+        </div>
+      </div>
+
+      <div class="field signup-only" id="fUsername" hidden>
         <label for="username">Username</label>
         <div class="wrap">
           <svg class="pre" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <input id="username" name="username" autocomplete="username"
-                 autocapitalize="none" spellcheck="false" placeholder="priya"
-                 required autofocus>
+                 autocapitalize="none" spellcheck="false" placeholder="priya">
         </div>
       </div>
 
@@ -383,6 +447,41 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
 const $ = id => document.getElementById(id);
 
 let mode = "signin";
+let chosenRole = null;
+
+/* The three seeded demo accounts. The password is the documented demo one --
+ * a convenience for presenting, not a security design. Change it with
+ * `python3 app/server.py --passwd <user>` or by setting $DEMO_PASSWORD. */
+const DEMO = {
+  customer: {email: "priya@support-coach.local", name: "Priya (Customer)"},
+  agent:    {email: "rahul@support-coach.local", name: "Rahul (Agent)"},
+  admin:    {email: "admin@support-coach.local", name: "Admin"},
+};
+const DEMO_PASSWORD = "support-coach-demo";
+
+function pickRole(role){
+  chosenRole = role;
+  document.querySelectorAll("#roles .role").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.role === role));
+}
+
+document.querySelectorAll("#roles .role").forEach(b => {
+  b.onclick = () => { pickRole(b.dataset.role); $("err").hidden = true; };
+});
+
+// One click fills everything and signs in, so nobody types a password on a
+// stage. The role card is set too, so the form is self-consistent.
+document.querySelectorAll("#demos .demo").forEach(b => {
+  b.onclick = () => {
+    const who = DEMO[b.dataset.demo];
+    if(!who) return;
+    $("email").value = who.email;
+    $("password").value = DEMO_PASSWORD;
+    pickRole(b.dataset.demo);
+    $("err").hidden = true;
+    $("form").requestSubmit();
+  };
+});
 
 function busy(on){
   $("submit").disabled = on;
@@ -400,6 +499,8 @@ function setMode(next){
 
   document.querySelectorAll(".signup-only")
     .forEach(el => { el.hidden = mode !== "signup"; });
+  document.querySelectorAll(".signin-only")
+    .forEach(el => { el.hidden = mode !== "signin"; });
   $("modes").querySelectorAll("button").forEach(b =>
     b.setAttribute("aria-pressed", b.dataset.mode === mode));
 
@@ -407,7 +508,7 @@ function setMode(next){
   $("headline").textContent = mode === "signup" ? "Get started" : "Welcome back";
   $("sub").textContent = mode === "signup"
     ? "Pick a username and a password of at least 8 characters. You will be signed in straight away."
-    : "Customer transcripts are behind this. Use the account your team lead set up for you.";
+    : "Choose how you are signing in, then use your email and password.";
   $("hint").innerHTML = mode === "signup"
     ? "Already have an account? Choose <b>Sign in</b> above."
     : "No account? Choose <b>Create account</b> above, or make one from the command line with <code>python3 app/server.py --add-user</code>.";
@@ -415,7 +516,7 @@ function setMode(next){
   $("password").setAttribute("autocomplete",
     mode === "signup" ? "new-password" : "current-password");
   busy(false);
-  (mode === "signup" ? $("display") : $("username")).focus();
+  (mode === "signup" ? $("display") : $("email")).focus();
 }
 
 $("modes").querySelectorAll("button").forEach(b => {
@@ -568,9 +669,11 @@ $("form").addEventListener("submit", async e => {
   }
 
   const body = signingUp
-    ? {username: $("username").value.trim(), password: $("password").value,
-       confirm: $("confirm").value, display_name: $("display").value.trim(), next}
-    : {username: $("username").value.trim(), password: $("password").value, next};
+    ? {username: $("username").value.trim(), email: $("email").value.trim(),
+       password: $("password").value, confirm: $("confirm").value,
+       display_name: $("display").value.trim(), next}
+    : {email: $("email").value.trim(), password: $("password").value,
+       role: chosenRole || undefined, next};
 
   let data;
   try{

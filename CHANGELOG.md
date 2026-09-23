@@ -7,7 +7,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Three roles, three workspaces.** `lead` is retired and folded into `admin`; `customer`
+  is new. A customer raises and tracks tickets in **/portal**, an agent works escalated
+  cases in the console, and an admin adds the dashboard, the write-action gate and the
+  exports. Accounts still on `lead` are moved to `admin` on boot rather than left holding a
+  role that no longer exists.
+- **A wrong turn sends you to your own workspace**, not to a 403 page. `/denied` is gone.
+  `/portal` is guarded by role membership rather than rank, so an admin — who outranks a
+  customer — is kept out of the customer's workspace just as firmly.
+- **The console is the agent's alone.** The Customer / Agent toggle is gone; what you type
+  is always an agent reply, and the composer says whose. The six Common Issues chips now
+  fill the agent's reply box with an opening line instead of a customer's complaint.
+- **Sign-up creates a customer, not an agent.** Somebody who finds the login page and makes
+  an account is a person with a problem, not a member of staff.
+
 ### Added
+
+- **Login by email, with a role selector and one-click demo accounts.** The chosen card is
+  checked against the account rather than trusted — picking Admin does not make you one.
+
 
 - **The work queue is in the console**, as a third column: search, All / Critical / High
   filters, click-to-open with no page reload, the open case shown selected, and `j` / `k` /

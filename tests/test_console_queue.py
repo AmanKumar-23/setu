@@ -20,7 +20,7 @@ def client(srv, auth_mod):
     auth_mod.harden(srv.app, local_only=True)
     srv.app.config["TESTING"] = True
     auth_mod.create_user("priya", "agent-password", "agent")
-    auth_mod.create_user("ravi", "lead-password", "lead")
+    auth_mod.create_user("ravi", "lead-password", "admin")
     return srv.app.test_client()
 
 

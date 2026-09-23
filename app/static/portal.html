@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your tickets — Support Coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F5F4F1; --surface:#FFFFFF; --surface-2:#FAFAF8; --surface-3:#F2F1ED;
+  --ink:#16181C; --ink-2:#5A6069; --ink-3:#8B929B;
+  --line:#EAE8E3; --line-2:#E0DDD6;
+  --brand:#EF4E2B; --brand-600:#D8401F; --brand-bg:#FEF0EC;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  --sh-1:0 1px 2px rgba(16,24,40,.05);
+  --sh-2:0 1px 3px rgba(16,24,40,.06), 0 8px 24px -6px rgba(16,24,40,.10);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+  min-height:100vh;display:flex;flex-direction:column}
+
+.appbar{flex:0 0 auto;background:var(--surface);border-bottom:1px solid var(--line);
+  padding:11px 20px;display:flex;align-items:center;gap:14px;box-shadow:var(--sh-1)}
+.brand{display:flex;align-items:center;gap:11px}
+.logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  background:linear-gradient(140deg,#FF6B3D,var(--brand) 60%,#D8401F);
+  color:#fff;font-weight:800;font-size:13px;letter-spacing:-.02em}
+.bname{font-size:15px;font-weight:750;letter-spacing:-.02em;line-height:1.1}
+.btag{font-size:10.5px;color:var(--ink-3);font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;margin-top:1px}
+.grow{flex:1}
+.me{display:flex;align-items:center;gap:9px;padding:4px 5px 4px 4px;
+  border:1px solid var(--line);border-radius:999px;background:var(--surface-2)}
+.me .av{width:26px;height:26px;flex:0 0 26px;border-radius:50%;display:grid;
+  place-items:center;font-size:11px;font-weight:800;color:#fff;
+  background:linear-gradient(140deg,#FF6B3D,var(--brand) 60%,#D8401F)}
+.me .mn{font-size:12.5px;font-weight:650;line-height:1.2}
+.me .mr{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);margin-top:1px}
+.me .out{width:26px;height:26px;border:0;border-radius:50%;background:transparent;
+  color:var(--ink-3);cursor:pointer;font-size:13px;transition:.15s}
+.me .out:hover{background:var(--surface-3);color:var(--brand)}
+
+main{flex:1;display:grid;place-items:center;padding:40px 20px}
+.card{max-width:560px;width:100%;background:var(--surface);border:1px solid var(--line);
+  border-radius:18px;box-shadow:var(--sh-2);padding:38px 34px;text-align:center}
+.ico{width:60px;height:60px;border-radius:18px;margin:0 auto 20px;display:grid;
+  place-items:center;font-size:26px;background:var(--brand-bg)}
+h1{font-size:22px;font-weight:800;letter-spacing:-.03em;margin-bottom:10px}
+.lede{font-size:14px;color:var(--ink-2);line-height:1.7;margin-bottom:24px}
+.soon{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;
+  background:var(--brand-bg);color:var(--brand-600);font-size:11px;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;margin-bottom:20px}
+.next{text-align:left;border-top:1px solid var(--line);padding-top:20px;margin-top:4px}
+.next .k{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:11px}
+.next ul{list-style:none;display:flex;flex-direction:column;gap:9px}
+.next li{display:flex;align-items:flex-start;gap:10px;font-size:13px;color:var(--ink-2);
+  line-height:1.55}
+.next li i{width:16px;height:16px;flex:0 0 16px;border-radius:5px;margin-top:2px;
+  background:var(--surface-3);display:grid;place-items:center;font-size:9px;
+  font-style:normal;color:var(--ink-3);font-weight:800}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">
+    <div class="logo">SC</div>
+    <div>
+      <div class="bname">Support Coach</div>
+      <div class="btag">Your tickets</div>
+    </div>
+  </div>
+  <div class="grow"></div>
+  <div class="me" id="me" hidden>
+    <span class="av" id="meAv">?</span>
+    <span>
+      <span class="mn" id="meName">—</span>
+      <span class="mr" id="meRole">—</span>
+    </span>
+    <button class="out" id="signOut" title="Sign out" aria-label="Sign out">⏻</button>
+  </div>
+</div>
+
+<main>
+  <div class="card">
+    <div class="ico">🎫</div>
+    <div class="soon">Coming next</div>
+    <h1>Customer portal — coming next</h1>
+    <p class="lede">
+      This is where you will raise a ticket and follow it through: what you
+      asked, what we found, and what happens next. Nothing here yet.
+    </p>
+
+    <div class="next">
+      <div class="k">What this page will do</div>
+      <ul>
+        <li><i>1</i><span>Raise a ticket with a subject, a category and a description.</span></li>
+        <li><i>2</i><span>See every ticket you have raised, and only yours.</span></li>
+        <li><i>3</i><span>Carry on the conversation from the ticket itself.</span></li>
+        <li><i>4</i><span>Rate how it went once it is resolved.</span></li>
+      </ul>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// Same shape the console and dashboard use: ask who is signed in, fill the
+// chip, and never render a control this role cannot use.
+(async () => {
+  let d;
+  try{ d = await (await fetch("/api/me")).json(); }catch(e){ return; }
+  if(!d || !d.ok) return;
+
+  const u = d.user;
+  $("meName").textContent = u.display_name;
+  $("meRole").textContent = u.role;
+  $("meAv").textContent = (u.display_name || u.username).trim()[0].toUpperCase();
+  $("me").hidden = false;
+})();
+
+$("signOut").onclick = async () => {
+  await fetch("/api/logout", {method: "POST"}).catch(() => {});
+  location.href = "/login";
+};
+</script>
+</body>
+</html>

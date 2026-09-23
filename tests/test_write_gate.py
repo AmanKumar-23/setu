@@ -198,7 +198,7 @@ def client(srv):
     auth.harden(srv.app, local_only=True)
     srv.app.config["TESTING"] = True
     auth.create_user("priya", "agent-password", "agent")
-    auth.create_user("ravi", "lead-password", "lead")
+    auth.create_user("ravi", "lead-password", "admin")
     return srv.app.test_client()
 
 
@@ -318,8 +318,11 @@ def test_the_audit_trail_is_behind_a_role(client, trail):
 
 
 def test_only_an_admin_exports_the_trail(client, trail):
-    sign_in(client, "ravi", "lead-password")
+    """priya is an agent; ravi is an admin since lead was retired."""
+    sign_in(client, "priya", "agent-password")
     assert client.get("/api/actions.csv").status_code == 403
+    sign_in(client, "ravi", "lead-password")
+    assert client.get("/api/actions.csv").status_code == 200
 
 
 def test_the_export_carries_the_decision_and_who_made_it(srv, trail):

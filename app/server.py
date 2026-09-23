@@ -39,7 +39,7 @@ sys.path.insert(0, HERE)
 import actions  # noqa: E402  (needs HERE on the path)
 import auth  # noqa: E402
 import metering  # noqa: E402
-from auth import require_role  # noqa: E402
+from auth import require_exact, require_role  # noqa: E402
 
 try:
     import coach_core
@@ -65,45 +65,58 @@ FALLBACK_SCORE = {"low": 25, "medium": 55, "high": 90}
 # demo) can pick a common issue instead of typing it out. The topics mirror
 # the KNOWLEDGE_BASE categories in Part 1 of the notebook, and the keywords
 # are what we count cases against for the dashboard's volume figures.
+# The six quick-fill chips in the console. Their `text` is the AGENT's
+# opening line, not the customer's complaint: customers write their own
+# messages in their own workspace now, so a chip that filled the box with
+# "mera recharge nahi hua" would be putting words in the wrong mouth.
+#
+# `keywords` still describe the CUSTOMER's language, because that is what the
+# dashboard's Knowledge section matches saved cases against.
 FAQS = [
     {
         "id": "recharge", "icon": "📱",
         "label": "Recharge failed, money deducted",
-        "text": "mera recharge nahi hua but paise cut gaye",
+        "text": "I can see the recharge did not go through even though the "
+                "amount was debited. Let me check the refund for you now.",
         "keywords": ["recharge", "paise cut", "deducted", "prepaid"],
     },
     {
         "id": "refund", "icon": "💸",
         "label": "Refund still not received",
-        "text": "bhai 2 din ho gaye, abhi tak refund nahi aaya",
+        "text": "Thank you for your patience. Let me look up exactly where "
+                "your refund has reached and when it will land.",
         "keywords": ["refund", "money back", "reversal", "paise wapas"],
     },
     {
         "id": "delivery", "icon": "📦",
         "label": "Order has not arrived",
-        "text": "bhai order abhi tak nahi aaya, bahut ganda service hai",
+        "text": "I am sorry your order has not reached you. Let me check "
+                "where the parcel is and what the courier has recorded.",
         "keywords": ["order", "delivery", "deliver", "parcel", "shipment"],
     },
     {
         "id": "network", "icon": "📶",
         "label": "Internet / network down",
-        "text": "My internet has stopped working since this morning.",
+        "text": "Sorry about the connection trouble. Let me check for an "
+                "outage in your area before we try anything on your device.",
         "keywords": ["internet", "network", "signal", "slow", "connection"],
     },
     {
         "id": "account", "icon": "🔑",
         "label": "Cannot log in",
-        "text": "I cannot log in and the password reset email never arrives.",
+        "text": "Let me get you back into your account. I will check what is "
+                "registered and send a fresh sign-in link.",
         "keywords": ["log in", "login", "password", "otp", "account"],
     },
     {
         "id": "escalate", "icon": "⚠️",
         "label": "Threatening to cancel",
-        "text": "This is the third time I am asking. I want to cancel and I will "
-                "take this further.",
+        "text": "I understand, and I am sorry you have had to ask more than "
+                "once. Let me take ownership of this and get it resolved today.",
         "keywords": ["cancel", "legal", "complaint", "consumer court", "escalate"],
     },
 ]
+
 
 def is_knowledge_gap(text):
     """True when we have nothing at all to answer this question with.
@@ -225,9 +238,36 @@ def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
         conn.executescript(auth.SCHEMA)
+        auth.apply_migrations(conn)
         conn.executescript(actions.SCHEMA)
         conn.executescript(metering.SCHEMA)
         apply_migrations(conn)
+
+
+# lead is gone, folded into admin. An account still holding it would fail
+# every guard and be unable to sign in anywhere, so it is moved rather than
+# left stranded. priya moves too: the demo expects her to be the customer,
+# and she owns no cases, so nothing follows her across.
+RETIRED_ROLES = {"lead": "admin"}
+DEMO_ROLE_FIXES = {"priya": "customer"}
+
+
+def migrate_retired_roles():
+    """Move accounts off roles that no longer exist. Returns what it moved."""
+    moved = []
+    for row in auth.list_users():
+        username, role = row["username"], row["role"]
+        wanted = RETIRED_ROLES.get(role) or (
+            DEMO_ROLE_FIXES.get(username) if role != DEMO_ROLE_FIXES.get(username)
+            else None)
+        if not wanted or wanted == role:
+            continue
+        try:
+            auth.set_role(username, wanted)
+            moved.append((username, role, wanted))
+        except ValueError:
+            pass          # a role we cannot set is not worth failing boot over
+    return moved
 
 
 def backfill_resolution_modes():
@@ -459,7 +499,7 @@ def may_use_write_actions():
     action guarded in three places out of four is not guarded.
     """
     return (current_user.is_authenticated
-            and current_user.at_least("lead"))
+            and current_user.at_least("admin"))
 
 
 def record_proposals(session):
@@ -498,7 +538,7 @@ def may_see_case(case):
     """
     if not current_user.is_authenticated:
         return False
-    if current_user.at_least("lead"):
+    if current_user.at_least("admin"):
         return True
     owner = case.get("owner")
     return owner is None or owner == current_user.username
@@ -1084,7 +1124,7 @@ def login_page():
 
 # The role a page needs, so the login can tell whether sending somebody back
 # where they came from would only bounce them again.
-PAGE_ROLES = {"/dashboard": "lead", "/": "agent"}
+PAGE_ROLES = {"/dashboard": "admin", "/": "agent", "/portal": "customer"}
 
 
 def landing_for(user, wanted=""):
@@ -1095,7 +1135,7 @@ def landing_for(user, wanted=""):
     would otherwise log in and land straight on "not allowed", which reads as
     the login having failed.
     """
-    home = "/dashboard" if user.at_least("lead") else "/"
+    home = user.landing
 
     wanted = (wanted or "").strip()
     # A protocol-relative "//evil.example" is a path to a browser and an open
@@ -1106,30 +1146,48 @@ def landing_for(user, wanted=""):
     needed = next((role for path, role in PAGE_ROLES.items()
                    if wanted == path or wanted.startswith(path.rstrip("/") + "/")),
                   None)
-    if needed and not user.at_least(needed):
-        return home
-    return wanted
+    if needed is None:
+        return wanted
+    # The portal is audience, not seniority: an admin outranks a customer but
+    # still does not belong in the customer's workspace.
+    allowed = (user.role == "customer" if needed == "customer"
+               else user.at_least(needed))
+    return wanted if allowed else home
 
 
 @app.post("/api/login")
 def do_login():
     body = request.json or {}
-    user, why = auth.authenticate(body.get("username", ""),
-                                  body.get("password", ""))
+
+    # "email" is what the form sends; "username" is what --add-user makes and
+    # what the test suite uses. find_user() accepts either.
+    handle = body.get("email") or body.get("username", "")
+    user, why = auth.authenticate(handle, body.get("password", ""))
     if user is None:
         # 401 with a deliberately vague reason -- see auth.authenticate().
         return jsonify({"ok": False, "error": why}), 401
+
+    # The role card is a claim about which workspace you meant to open. It is
+    # checked against the account rather than trusted -- picking Admin does
+    # not make you one -- so a mismatch is a clear message instead of a
+    # confusing landing somewhere you did not expect.
+    claimed = body.get("role")
+    if claimed and claimed in auth.ROLES and claimed != user.role:
+        return jsonify({"ok": False, "error": (
+            f"That is a {user.role} account. Choose the "
+            f"{user.role.title()} card to sign in.")}), 403
 
     login_user(user, remember=False, duration=None)
     return jsonify({"ok": True, "user": user.as_dict(),
                     "next": landing_for(user, body.get("next", ""))})
 
 
-# Self-service sign-up always lands on the LOWEST role. Nobody gets to give
-# themselves the dashboard, the write-action gate or the CSV exports by
-# filling in a form -- a lead or an admin is still made deliberately, from
-# the command line with --add-user.
-SIGNUP_ROLE = "agent"
+# Self-service sign-up creates a CUSTOMER. Somebody who finds the login page
+# and makes an account is a person with a problem, not a member of staff --
+# and this is what keeps the console, the dashboard, the write-action gate
+# and the exports behind an account that somebody made deliberately with
+# --add-user.
+SIGNUP_ROLE = "customer"
 
 # Letters, digits, dot, dash, underscore. create_user() lowercases and
 # strips, but it would otherwise accept a username with spaces in it, which
@@ -1190,9 +1248,11 @@ def me():
     return jsonify({"ok": True, "user": current_user.as_dict()})
 
 
-@app.get("/denied")
-def denied():
-    return send_from_directory(app.static_folder, "denied.html")
+@app.get("/portal")
+@require_exact("customer")
+def portal():
+    """The customer's own workspace. A placeholder for now."""
+    return send_from_directory(app.static_folder, "portal.html")
 
 
 # ==========================================================================
@@ -1205,7 +1265,7 @@ def index():
 
 
 @app.get("/dashboard")
-@require_role("lead")
+@require_role("admin")
 def dashboard():
     return send_from_directory(app.static_folder, "dashboard.html")
 
@@ -1453,7 +1513,7 @@ def agent_message():
 
 
 @app.post("/api/allow-writes")
-@require_role("lead")
+@require_role("admin")
 def set_allow_writes():
     """Decide whether the model may ASK for a data-changing action.
 
@@ -1475,7 +1535,7 @@ def set_allow_writes():
 
 
 @app.post("/api/actions/<int:action_id>/decide")
-@require_role("lead")
+@require_role("admin")
 def decide_action(action_id):
     """Approve or reject one proposed write. THE approval point.
 
@@ -1535,7 +1595,7 @@ def decide_action(action_id):
 
 
 @app.get("/api/actions")
-@require_role("lead")
+@require_role("admin")
 def list_actions():
     """The audit trail, filtered the way the Cases table filters."""
     rows, matched = actions.listing(
@@ -2165,7 +2225,7 @@ def queue_view():
 
 
 @app.get("/api/performance")
-@require_role("lead")
+@require_role("admin")
 def performance_view():
     cases = load_cases()
     chosen_range = read_range()
@@ -2177,7 +2237,7 @@ def performance_view():
 
 
 @app.get("/api/stats")
-@require_role("lead")
+@require_role("admin")
 def stats():
     """Everything the dashboard needs, counted server-side."""
     cases = load_cases()
@@ -2344,7 +2404,7 @@ def faqs():
 
 
 @app.get("/api/cases")
-@require_role("lead")
+@require_role("admin")
 def list_cases():
     """Recent cases, newest first, without the full message transcript."""
     limit = int(request.args.get("limit", 25))
@@ -2381,7 +2441,7 @@ def list_cases():
 
 
 @app.get("/api/usage")
-@require_role("lead")
+@require_role("admin")
 def usage():
     """What the model is costing: today against the cap, by day, by step,
     and the conversations that spent the most."""
@@ -2389,7 +2449,7 @@ def usage():
 
 
 @app.get("/api/gaps")
-@require_role("lead")
+@require_role("admin")
 def knowledge_gaps():
     """Every question our documentation could not answer, most asked first."""
     grouped = {}
@@ -2621,7 +2681,7 @@ def run_cli(argv):
     print("""
   Account commands:
       --list-users
-      --add-user [username] [agent|lead|admin]
+      --add-user [username] [customer|agent|admin]
       --passwd [username]
       --disable-user [username]
       --enable-user [username]
@@ -2653,6 +2713,12 @@ if __name__ == "__main__":
     # table is empty. Both need the database, so they come after the migrate.
     auth.harden(app, local_only=True)
     seeded = auth.ensure_seed_admin()
+    moved = migrate_retired_roles()
+    # One documented password for the demo accounts, so the login page's
+    # one-click buttons can fill it. A convenience for presenting, not a
+    # security design -- change it with --passwd, or set DEMO_PASSWORD.
+    demo_password = os.getenv("DEMO_PASSWORD", "support-coach-demo")
+    demo_made = auth.ensure_demo_users(demo_password)
 
     key_file = coach_core.find_key_file()
     saved = load_cases()
@@ -2667,6 +2733,11 @@ if __name__ == "__main__":
         print(f"  migrated : {imported} case(s) imported from cases.json")
     if backfilled:
         print(f"  backfill : resolution mode set on {backfilled} older case(s)")
+    for username, was, now in moved:
+        print(f"  role     : {username} moved from {was} to {now}")
+    if demo_made:
+        print(f"  seeded   : {', '.join(demo_made)} "
+              f"(password: {demo_password})")
     print(f"  cases    : {len(saved)} saved "
           f"({sum(1 for c in saved if c.get('status') == 'resolved')} resolved)")
 
@@ -2697,7 +2768,7 @@ if __name__ == "__main__":
         print()
         print("  Then add the people who will actually use this:")
         print("      python3 app/server.py --add-user priya agent")
-        print("      python3 app/server.py --add-user ravi lead")
+        print("      python3 app/server.py --add-user ravi agent")
         print("  " + "=" * 58)
 
     print()
