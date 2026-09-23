@@ -39,7 +39,9 @@ sys.path.insert(0, HERE)
 import actions  # noqa: E402  (needs HERE on the path)
 import auth  # noqa: E402
 import metering  # noqa: E402
+import pipeline  # noqa: E402
 from auth import require_exact, require_role  # noqa: E402
+from pipeline import note_redactions, open_rating_slot  # noqa: E402
 
 try:
     import coach_core
@@ -59,8 +61,6 @@ app = Flask(__name__, static_folder=os.path.join(HERE, "static"))
 # analyze_customer_message() now returns a real 0-100 frustration score of its
 # own, so the old low/medium/high -> number lookup is gone. This stays only as
 # a fallback for a response that somehow arrives without one.
-FALLBACK_SCORE = {"low": 25, "medium": 55, "high": 90}
-
 # The canned questions offered in the console, so an agent (or you, during a
 # demo) can pick a common issue instead of typing it out. The topics mirror
 # the KNOWLEDGE_BASE categories in Part 1 of the notebook, and the keywords
@@ -118,33 +118,7 @@ FAQS = [
 ]
 
 
-def is_knowledge_gap(text):
-    """True when we have nothing at all to answer this question with.
 
-    Two independent misses are required:
-      1. knowledge_gap_detector() from Part 1 of the notebook finds no help
-         article (it also appends to the notebook's KNOWLEDGE_GAP_LOG), and
-      2. none of the FAQ topics above matches on keywords either.
-
-    A gap is not a bug. It is a real customer asking something the
-    documentation cannot answer -- which is to say, a help article somebody
-    still has to write.
-    """
-    lowered = (text or "").lower()
-
-    matches_faq = any(
-        word in lowered
-        for faq in FAQS
-        for word in faq["keywords"]
-    )
-    if matches_faq:
-        return False
-
-    try:
-        return coach_core.knowledge_gap_detector(text)
-    except Exception:
-        # Part 1's knowledge base is optional; without it we cannot judge.
-        return False
 
 
 # How sure the knowledge base must be before we answer a customer without any
@@ -152,7 +126,6 @@ def is_knowledge_gap(text):
 # article to an agent: putting an answer straight in front of a customer needs
 # more confidence than putting one in front of a human who can overrule it.
 # Measured matches ran 0.596-0.711, so 0.65 keeps only the strong half.
-AUTO_RESOLVE_THRESHOLD = 0.65
 
 
 # How long we have to give the customer a FIRST reply, by how risky the
@@ -204,6 +177,12 @@ CREATE INDEX IF NOT EXISTS cases_opened ON cases(opened_at);
 # them applied by hand -- guarded, because ALTER TABLE has no IF NOT EXISTS.
 MIGRATIONS = [
     ("owner", "ALTER TABLE cases ADD COLUMN owner TEXT"),
+    # owner is the AGENT working a case. Until now nothing recorded who
+    # RAISED it, which is the one thing "their own tickets" needs to know.
+    ("customer", "ALTER TABLE cases ADD COLUMN customer TEXT"),
+    ("subject", "ALTER TABLE cases ADD COLUMN subject TEXT"),
+    ("category", "ALTER TABLE cases ADD COLUMN category TEXT"),
+    ("updated_at", "ALTER TABLE cases ADD COLUMN updated_at TEXT"),
 ]
 
 
@@ -212,6 +191,11 @@ def apply_migrations(conn):
     for column, statement in MIGRATIONS:
         if column not in have:
             conn.execute(statement)
+
+    # After the columns exist, not inside MIGRATIONS -- that list is pairs of
+    # (column, ALTER), and an index is neither.
+    conn.execute("CREATE INDEX IF NOT EXISTS cases_customer "
+                 "ON cases(customer)")
 
 
 def connect():
@@ -227,6 +211,9 @@ def connect():
 # the path.
 auth.configure(connect)
 actions.configure(connect)
+pipeline.configure(
+    now_iso=lambda: now_iso(),
+    record_proposals=lambda sess: record_proposals(sess))
 metering.configure(connect)
 
 # Every Gemini call the engine makes now reports its token count here. The
@@ -327,7 +314,8 @@ def migrate_from_json():
 def _row_values(case):
     return (case.get("id"), case.get("status"), case.get("escalation_risk"),
             case.get("sentiment"), case.get("opened_at"), case.get("closed_at"),
-            case.get("owner"), json.dumps(case))
+            case.get("owner"), case.get("customer"), case.get("subject"),
+            case.get("category"), case.get("updated_at"), json.dumps(case))
 
 
 def save_case(case):
@@ -338,11 +326,13 @@ def save_case(case):
     """
     if not case.get("id"):
         return
+    case["updated_at"] = now_iso()      # "Last updated", for the ticket list
     with connect() as conn:
         conn.execute("""
             INSERT INTO cases (id, status, escalation_risk, sentiment,
-                               opened_at, closed_at, owner, data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                               opened_at, closed_at, owner, customer,
+                               subject, category, updated_at, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 escalation_risk=excluded.escalation_risk,
@@ -350,6 +340,10 @@ def save_case(case):
                 opened_at=excluded.opened_at,
                 closed_at=excluded.closed_at,
                 owner=excluded.owner,
+                customer=excluded.customer,
+                subject=excluded.subject,
+                category=excluded.category,
+                updated_at=excluded.updated_at,
                 data=excluded.data
         """, _row_values(case))
 
@@ -375,8 +369,9 @@ def save_cases(cases):
         conn.execute("DELETE FROM cases")
         conn.executemany("""
             INSERT INTO cases (id, status, escalation_risk, sentiment,
-                               opened_at, closed_at, owner, data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                               opened_at, closed_at, owner, customer,
+                               subject, category, updated_at, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [_row_values(c) for c in cases if c.get("id")])
 
 
@@ -560,6 +555,12 @@ class LiveSession:
     def reset(self):
         self.case_id = None          # assigned on the first message
         self.owner = None            # the agent it belongs to
+        # Who RAISED it, and how they described it. Set by the portal; the
+        # console leaves them empty because an agent-side case has no
+        # customer account behind it.
+        self.customer = None
+        self.subject = ""
+        self.category = ""
         self.opened_at = None
         self.state = coach_core.ConversationState()
         self.last_customer_message = ""
@@ -608,6 +609,9 @@ class LiveSession:
         case = {
             "id": self.case_id,
             "owner": self.owner,
+            "customer": self.customer,
+            "subject": self.subject,
+            "category": self.category,
             "opened_at": self.opened_at,
             "first_response_at": self.first_response_at,
             "closed_at": closed_at,
@@ -637,7 +641,8 @@ class LiveSession:
             "messages": [
                 {"speaker": m.speaker, "text": m.text,
                  "source": getattr(m, "source", "human"),
-                 "channel": getattr(m, "channel", "typed")}
+                 "channel": getattr(m, "channel", "typed"),
+                 "author": getattr(m, "author", "")}
                 for m in self.state.history
             ],
         }
@@ -716,6 +721,9 @@ class LiveSession:
         # whoever opens it. Otherwise those cases would belong to nobody and
         # no agent could ever pick them up again.
         self.owner = case.get("owner") or signed_in_username()
+        self.customer = case.get("customer")
+        self.subject = case.get("subject") or ""
+        self.category = case.get("category") or ""
         self.opened_at = case.get("opened_at")
         self.first_response_at = case.get("first_response_at")
         self.trajectory = list(case.get("trajectory") or [])
@@ -730,7 +738,8 @@ class LiveSession:
             self.state.add_message(message.get("speaker", "customer"),
                                    message.get("text", ""),
                                    message.get("source", "human"),
-                                   message.get("channel", "typed"))
+                                   message.get("channel", "typed"),
+                                   message.get("author", ""))
 
         # The agent replies to the last thing the CUSTOMER said, which is not
         # necessarily the last line of the transcript.
@@ -1027,57 +1036,13 @@ def category_volume(cases):
     return {"rows": rows, "total": total}
 
 
-def try_auto_resolve(text):
-    """Answer the customer outright when we are confident enough to.
-
-    Two conditions, both required:
-      1. the conversation is calm (escalation risk low), and
-      2. semantic search found a strongly matching help article.
-
-    A keyword match never qualifies -- its score is a word count, not a
-    confidence, and it is the weaker matcher.
-    """
-    if session.state.escalation_risk != "low":
-        return None
-
-    article = coach_core.find_kb_article(text)
-    if not article or article.get("how") != "semantic":
-        return None
-    if article.get("score", 0) < AUTO_RESOLVE_THRESHOLD:
-        return None
-
-    reply = session.coach.suggest_reply(
-        text, session.state.history,
-        analysis={
-            "sentiment": session.state.sentiment,
-            "urgency": session.state.urgency,
-            "key_issue": session.state.key_issue,
-        },
-        facts=session.facts,
-    )
-    return {"reply": reply, "topic": article["topic"],
-            "confidence": article["score"]}
 
 
-def open_rating_slot(session, grounded, topic=None):
-    """Record that a suggestion was produced, ready for a thumbs up or down."""
-    session.ratings.append({
-        "rating": None,
-        "grounded": bool(grounded),
-        "topic": topic,
-        "at": now_iso(),
-    })
 
 
-def note_redactions(session):
-    """Fold the last call's redaction log into the case, without repeats."""
-    seen = {(r["kind"], r["placeholder"], r["masked"])
-            for r in session.redactions}
-    for entry in getattr(session.coach, "last_redactions", []) or []:
-        key = (entry["kind"], entry["placeholder"], entry["masked"])
-        if key not in seen:
-            seen.add(key)
-            session.redactions.append(entry)
+
+
+
 
 
 @app.before_request
@@ -1248,11 +1213,198 @@ def me():
     return jsonify({"ok": True, "user": current_user.as_dict()})
 
 
+# ==========================================================================
+# The customer's workspace
+# ==========================================================================
+# What a customer is allowed to know about their own ticket. THREE states,
+# and this is the only function that decides which -- so when the decision
+# engine lands and adds an "escalated" status, it joins the amber row here
+# and nowhere else.
+CUSTOMER_STATES = {
+    "ai_handled":      {"label": "Handled by AI", "tone": "green"},
+    "human_reviewing": {"label": "A human agent is reviewing", "tone": "amber"},
+    "resolved":        {"label": "Resolved", "tone": "grey"},
+}
+
+CATEGORIES = ["Recharge", "Refund", "Order & Delivery", "Network",
+              "Account & Login", "Other"]
+
+
+def customer_status_of(case):
+    """Which of the three states the customer sees. Nothing else leaks."""
+    status = case.get("status")
+    if status == "auto_resolved":
+        return "ai_handled"
+    if status == "resolved":
+        return "resolved"
+    return "human_reviewing"        # pending, escalated, anything open
+
+
+def as_customer_case(case, *, with_messages=False):
+    """The ONLY shape a case is ever sent to a customer in.
+
+    An allow-list, naming every field it emits, rather than a deny-list that
+    strips the forbidden ones. A deny-list leaks every field anybody adds
+    later; this fails closed. Nothing about sentiment, urgency, escalation
+    risk, gates, scores, coaching, lookups or cost can travel through here,
+    because none of them is named.
+    """
+    state = customer_status_of(case)
+    out = {
+        "id": case.get("id"),
+        "subject": case.get("subject") or (case.get("key_issue") or "Support request"),
+        "category": case.get("category") or "Other",
+        "status": state,
+        "status_label": CUSTOMER_STATES[state]["label"],
+        "status_tone": CUSTOMER_STATES[state]["tone"],
+        "updated_at": case.get("updated_at") or case.get("opened_at"),
+        "opened_at": case.get("opened_at"),
+    }
+
+    if with_messages:
+        out["messages"] = [
+            {
+                "speaker": m.get("speaker"),
+                "text": m.get("text", ""),
+                # Who the customer sees it from. An agent's own name when a
+                # person took over, so the handover is visible to them.
+                "from": ("You" if m.get("speaker") == "customer"
+                         else m.get("author")
+                         or ("AI assistant" if m.get("source") == "ai"
+                             else "Support agent")),
+                "is_ai": m.get("speaker") != "customer" and m.get("source") == "ai",
+            }
+            for m in case.get("messages", [])
+        ]
+    return out
+
+
+def cases_for_customer(username):
+    """Their own tickets, newest activity first."""
+    mine = [c for c in load_cases() if c.get("customer") == username]
+    mine.sort(key=lambda c: c.get("updated_at") or c.get("opened_at") or "",
+              reverse=True)
+    return mine
+
+
+def customer_case_or_none(case_id, username):
+    """One case, only if it belongs to this customer.
+
+    Callers answer a miss with 404 rather than 403: "that case exists but is
+    not yours" is itself a small leak.
+    """
+    for case in load_cases():
+        if case.get("id") == case_id and case.get("customer") == username:
+            return case
+    return None
+
+
+def scoped_session_for(case):
+    """A short-lived session holding ONE case.
+
+    The console's module-level session is a single conversation for the whole
+    process. A customer typing at the same time as an agent would land in the
+    agent's transcript. load() + persist() already bracket every turn, so a
+    per-request session is a legitimate unit of work.
+    """
+    sess = LiveSession()
+    sess.load(case)
+    return sess
+
+
 @app.get("/portal")
 @require_exact("customer")
 def portal():
-    """The customer's own workspace. A placeholder for now."""
+    """The customer's ticket list."""
     return send_from_directory(app.static_folder, "portal.html")
+
+
+@app.get("/portal/chat/<case_id>")
+@require_exact("customer")
+def portal_chat(case_id):
+    """One conversation. Ownership is checked by the API the page calls."""
+    if customer_case_or_none(case_id, signed_in_username()) is None:
+        return redirect("/portal?error=not-your-ticket")
+    return send_from_directory(app.static_folder, "portal-chat.html")
+
+
+@app.get("/api/portal/tickets")
+@require_exact("customer")
+def portal_tickets():
+    me = signed_in_username()
+    return jsonify({"ok": True, "categories": CATEGORIES,
+                    "tickets": [as_customer_case(c) for c in cases_for_customer(me)]})
+
+
+@app.post("/api/portal/tickets")
+@require_exact("customer")
+def portal_new_ticket():
+    """Raise a ticket, then run the same pipeline the console runs."""
+    body = request.json or {}
+    subject = (body.get("subject") or "").strip()
+    category = (body.get("category") or "").strip()
+    description = (body.get("description") or "").strip()
+
+    if not subject:
+        return jsonify({"ok": False, "error": "A subject is required."}), 400
+    if not description:
+        return jsonify({"ok": False, "error": "Tell us what happened."}), 400
+    if category not in CATEGORIES:
+        category = "Other"
+
+    refused = over_budget()
+    if refused:
+        return refused
+
+    me = signed_in_username()
+    sess = LiveSession()
+    sess.customer = me
+    sess.subject = subject[:120]
+    sess.category = category
+
+    try:
+        pipeline.run_customer_turn(sess, description)
+    except Exception as error:
+        return failure(error)
+
+    case = next((c for c in load_cases() if c.get("id") == sess.case_id), None)
+    return jsonify({"ok": True, "ticket": as_customer_case(case or {})})
+
+
+@app.get("/api/portal/cases/<case_id>")
+@require_exact("customer")
+def portal_case(case_id):
+    case = customer_case_or_none(case_id, signed_in_username())
+    if case is None:
+        return jsonify({"ok": False, "error": f"No ticket {case_id}."}), 404
+    return jsonify({"ok": True, "ticket": as_customer_case(case, with_messages=True)})
+
+
+@app.post("/api/portal/cases/<case_id>/message")
+@require_exact("customer")
+def portal_message(case_id):
+    """Carry on the conversation. Same pipeline, scoped session."""
+    text = ((request.json or {}).get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "Empty message."}), 400
+
+    case = customer_case_or_none(case_id, signed_in_username())
+    if case is None:
+        return jsonify({"ok": False, "error": f"No ticket {case_id}."}), 404
+
+    refused = over_budget()
+    if refused:
+        return refused
+
+    sess = scoped_session_for(case)
+    try:
+        pipeline.run_customer_turn(sess, text)
+    except Exception as error:
+        return failure(error)
+
+    fresh = customer_case_or_none(case_id, signed_in_username())
+    return jsonify({"ok": True,
+                    "ticket": as_customer_case(fresh or {}, with_messages=True)})
 
 
 # ==========================================================================
@@ -1297,6 +1449,11 @@ def health():
 @app.post("/api/customer")
 @require_role("agent")
 def customer_message():
+    """A customer message, from the agent console.
+
+    The turn itself lives in pipeline.run_customer_turn() so that the portal
+    runs exactly the same one. All this route does is HTTP.
+    """
     body = request.json or {}
     text = (body.get("text", "") or "").strip()
     if not text:
@@ -1306,128 +1463,21 @@ def customer_message():
     if refused:
         return refused
 
-    # Voice is an INPUT METHOD. The channel is recorded on the message and
-    # changes nothing about what happens next -- the same text goes down the
-    # same pipeline whether it was typed or spoken.
-    session.state.add_message("customer", text, channel=read_channel(body))
-    session.last_customer_message = text
-
-    # Log it before we call the model -- whether we can answer this has
-    # nothing to do with whether the analysis succeeds.
-    if is_knowledge_gap(text):
-        session.unanswered.append({"text": text, "at": now_iso()})
-
-    # Give the case its id BEFORE the first model call, so every token this
-    # turn spends has a case to be billed to. Without this the opening turn
-    # of every conversation would be recorded against no case at all.
-    if session.case_id is None:
-        session.persist()
-
-    started = time.perf_counter()
     try:
-        # Hand over the whole conversation so the model judges the trajectory,
-        # not one isolated sentence.
-        analysis = session.coach.analyze_customer_message(
-            text, session.state.history
-        )
+        turn = pipeline.run_customer_turn(
+            session, text, channel=read_channel(body))
     except Exception as error:
-        session.persist()            # keep the case even if the model failed
         return failure(error)
-    elapsed = int((time.perf_counter() - started) * 1000)
-
-    session.state.sentiment = analysis.get("sentiment", "unknown")
-    session.state.urgency = analysis.get("urgency", "unknown")
-    session.state.escalation_risk = analysis.get("escalation_risk", "unknown")
-    session.state.key_issue = analysis.get("key_issue", "")
-    session.state.frustration = analysis.get(
-        "frustration", FALLBACK_SCORE.get(session.state.escalation_risk, 35)
-    )
-    session.state.trend = analysis.get("trend", "flat")
-    # analyze_customer_message() has already forced these into their enums, so
-    # whatever arrives here is paintable.
-    session.state.intent = analysis.get("intent", "")
-    session.state.intent_confidence = analysis.get("intent_confidence")
-    session.state.emotion = analysis.get("emotion", "")
-    note_redactions(session)
-    session.trajectory.append(session.state.frustration)
-
-    # Query the order system now rather than waiting for the agent to reply,
-    # so the facts are on screen while they are still typing.
-    try:
-        session.facts = session.coach.gather_facts(
-            text, session.state.history, allow_writes=session.allow_writes
-        )
-    except Exception:
-        session.facts = []          # a lookup failing must not lose the turn
-
-    # Anything the model asked to WRITE is recorded as a proposal now. It is
-    # not run here, and there is no branch below that runs it.
-    try:
-        record_proposals(session)
-    except Exception as error:
-        # Fails closed and loudly. With no row in the trail there is no card
-        # to approve, so nothing can run -- but a silent audit failure on a
-        # safety path is its own bug, so it is never swallowed quietly.
-        print(f"  AUDIT: could not record proposals: {error}")
-
-    # Can we just answer this, without an agent ever seeing it?
-    session.auto_reply = None
-    try:
-        auto = try_auto_resolve(text)
-    except Exception:
-        auto = None                 # never let this break an ordinary turn
-
-    if auto:
-        session.auto_reply = auto
-        # The automatic answer is a real reply, so it goes in the transcript
-        # and it stops the first-response clock. Deflection answers instantly,
-        # which is rather the point of it.
-        session.state.add_message("agent", auto["reply"], source="ai")
-        # An automatic answer is only ever sent when an article matched.
-        open_rating_slot(session, True, auto.get("topic"))
-        session.last_suggestion = auto["reply"]
-        if session.first_response_at is None:
-            session.first_response_at = now_iso()
-        session.persist(status="auto_resolved", closed_at=now_iso())
-
-    else:
-        # Draft a reply NOW, on the customer's turn.
-        #
-        # This used to wait until the agent had already typed something, which
-        # is backwards: by then they have done the work the draft was meant to
-        # save. The agent should open the case and find a reply waiting, ready
-        # to send, edit, or ignore.
-        try:
-            session.last_suggestion = session.coach.suggest_reply(
-                text,
-                session.state.history,
-                analysis={
-                    "sentiment": session.state.sentiment,
-                    "urgency": session.state.urgency,
-                    "key_issue": session.state.key_issue,
-                },
-                facts=session.facts,
-            )
-            note_redactions(session)
-
-            article = getattr(session.coach, "last_article", None)
-            open_rating_slot(session, article is not None,
-                             article.get("topic") if article else None)
-        except Exception:
-            # A draft failing must not cost the agent the analysis, the
-            # lookups, or the turn itself.
-            session.last_suggestion = ""
-
-        session.persist(reopen=True)
 
     return jsonify({
         "ok": True,
-        "analysis": analysis,
-        "latency_ms": elapsed,
-        "model_used": getattr(session.coach, "last_model_used", session.coach.model),
-        "facts": session.facts,
-        "auto_reply": session.auto_reply,
-        "suggestion": session.last_suggestion,
+        "analysis": turn.analysis,
+        "latency_ms": turn.latency_ms,
+        "model_used": getattr(session.coach, "last_model_used",
+                              session.coach.model),
+        "facts": turn.facts,
+        "auto_reply": turn.auto_reply,
+        "suggestion": turn.suggestion,
         "state": session.as_dict(),
     })
 
@@ -1456,9 +1506,12 @@ def agent_message():
     # it. Either is a draft that did work, which is what hybrid means.
     clicked = bool(body.get("used_suggestion"))
     close = similarity(text, session.last_suggestion) > HYBRID_SIMILARITY
+    # The agent's name travels with the message: the customer's chat shows
+    # it, so a person taking over from the AI is visible to them.
+    who = getattr(current_user, "display_name", None) or signed_in_username()
     session.state.add_message(
         "agent", text, source="hybrid" if (clicked or close) else "human",
-        channel=read_channel(body))
+        channel=read_channel(body), author=who or "")
 
     # The moment the customer first hears back stops the SLA clock.
     if session.first_response_at is None:

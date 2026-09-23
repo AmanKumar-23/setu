@@ -78,4 +78,9 @@ def test_migration_preserves_nested_structures(srv, case):
         json.dump({"cases": [rich]}, handle)
 
     srv.migrate_from_json()
-    assert srv.load_cases()[0] == rich
+
+    stored = srv.load_cases()[0]
+    # save_case() stamps "Last updated" on the way in, so the row is the case
+    # PLUS that. Everything the caller wrote must survive untouched.
+    assert stored.pop("updated_at")
+    assert stored == rich

@@ -237,6 +237,10 @@ class Message:
     #   typed   somebody typed it
     #   voice   somebody dictated it
     channel: str = "typed"
+    # Who sent it, by name. Only set on an outgoing message, and only when a
+    # PERSON sent it -- the customer's chat shows this so that an agent
+    # taking over from the AI is visible to them rather than silent.
+    author: str = ""
 
 
 @dataclass
@@ -258,14 +262,15 @@ class ConversationState:
     emotion: str = ""
 
     def add_message(self, speaker: str, text: str, source: str = "human",
-                    channel: str = "typed"):
+                    channel: str = "typed", author: str = ""):
         """Add a new message to the conversation history."""
         self.history.append(
             Message(
                 speaker=speaker,
                 text=text,
                 source=source,
-                channel=channel
+                channel=channel,
+                author=author
             )
         )
 

@@ -40,8 +40,9 @@ def test_knowledge_gap_is_flagged(core):
 
 def test_gap_needs_both_matchers_to_miss(srv):
     """A gap means the knowledge base AND the FAQ list both had nothing."""
-    assert srv.is_knowledge_gap("mera recharge nahi hua") is False
-    assert srv.is_knowledge_gap("Can I get a GST invoice?") is True
+    import pipeline  # the gap check lives here now
+    assert pipeline.is_knowledge_gap("mera recharge nahi hua") is False
+    assert pipeline.is_knowledge_gap("Can I get a GST invoice?") is True
 
 
 def test_cosine_is_sane(core):

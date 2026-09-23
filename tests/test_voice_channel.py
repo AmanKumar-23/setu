@@ -73,7 +73,10 @@ def test_the_channel_does_not_change_how_a_message_is_handled(srv, client, monke
                             "emotion": "Angry"})
     monkeypatch.setattr(srv.session.coach, "gather_facts", lambda *a, **k: [])
     monkeypatch.setattr(srv.session.coach, "suggest_reply", lambda *a, **k: "draft")
-    monkeypatch.setattr(srv, "try_auto_resolve", lambda text: None)
+    # The turn lives in pipeline now, so that is what has to be patched --
+    # patching the server would leave the real one running.
+    import pipeline
+    monkeypatch.setattr(pipeline, "try_auto_resolve", lambda sess, text: None)
 
     client.post("/api/customer", json={"text": "mera recharge fail ho gaya",
                                        "channel": "voice"})
