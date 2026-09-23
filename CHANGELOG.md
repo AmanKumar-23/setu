@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The customer workspace.** `/portal` lists a customer's own tickets with three states —
+  Handled by AI, A human agent is reviewing, Resolved — and `/portal/chat/<id>` carries the
+  conversation. Raising a ticket runs the same pipeline the console runs; the turn moved
+  into `app/pipeline.py` and takes the session it works on, so the portal can use a
+  short-lived one per request instead of the console's process-wide global.
+- **Customers can rate a resolved ticket** — five stars and an optional line, changeable
+  for 24 hours. The storage and the dashboard tile already existed; what was missing was
+  somewhere for the person with the opinion to answer from. Both routes call the same
+  `record_csat()`, so the rules have one implementation.
+
 ### Changed
 
 - **Three roles, three workspaces.** `lead` is retired and folded into `admin`; `customer`
