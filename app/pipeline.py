@@ -21,6 +21,7 @@ Nothing here imports Flask. The caller owns HTTP.
 import time
 
 import coach_core
+import languages
 
 # Where a risk band lands when the model gave no number of its own.
 FALLBACK_SCORE = {"low": 25, "medium": 55, "high": 90}
@@ -85,7 +86,7 @@ def open_rating_slot(sess, grounded, topic=None):
                          "topic": topic, "at": _now_iso()})
 
 
-def try_auto_resolve(sess, text):
+def try_auto_resolve(sess, text, language="en"):
     """Answer outright when the conversation is calm AND an article matched."""
     if sess.state.escalation_risk != "low":
         return None
@@ -102,6 +103,7 @@ def try_auto_resolve(sess, text):
                   "urgency": sess.state.urgency,
                   "key_issue": sess.state.key_issue},
         facts=sess.facts,
+        language_note=languages.reply_instruction(language),
     )
     return {"reply": reply, "topic": article["topic"],
             "confidence": article["score"]}
@@ -110,13 +112,20 @@ def try_auto_resolve(sess, text):
 # --------------------------------------------------------------------------
 # The turn
 # --------------------------------------------------------------------------
-def run_customer_turn(sess, text, *, channel="typed"):
+def run_customer_turn(sess, text, *, channel="typed", language=None):
     """Analyse, look up, then either answer outright or draft for an agent.
+
+    `language` is the language the REPLY is written in. It reaches
+    suggest_reply and nothing else: analyse, lookup and score stay in English
+    however the customer writes, because the dashboard, the work queue and
+    the knowledge grouping all read one vocabulary.
 
     Raises whatever the model raised if the ANALYSE step fails -- the caller
     turns that into an HTTP error. Every later step is best-effort: a failed
     lookup or a failed draft must not cost the turn its analysis.
     """
+    language = languages.normalise(language or getattr(sess, "language", None))
+    sess.language = language
     sess.state.add_message("customer", text, channel=channel)
     sess.last_customer_message = text
 
@@ -176,7 +185,7 @@ def run_customer_turn(sess, text, *, channel="typed"):
 
     sess.auto_reply = None
     try:
-        auto = try_auto_resolve(sess, text)
+        auto = try_auto_resolve(sess, text, language)
     except Exception:
         auto = None              # never let this break an ordinary turn
 
@@ -201,6 +210,7 @@ def run_customer_turn(sess, text, *, channel="typed"):
                           "urgency": state.urgency,
                           "key_issue": state.key_issue},
                 facts=sess.facts,
+                language_note=languages.reply_instruction(language),
             )
             note_redactions(sess)
             article = getattr(sess.coach, "last_article", None)

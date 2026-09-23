@@ -584,6 +584,8 @@ class LiveSession:
         self.customer = None
         self.subject = ""
         self.category = ""
+        # The language the REPLY is written in. Analysis stays English.
+        self.language = DEFAULT_LANGUAGE
         self.opened_at = None
         self.state = coach_core.ConversationState()
         self.last_customer_message = ""
@@ -635,6 +637,7 @@ class LiveSession:
             "customer": self.customer,
             "subject": self.subject,
             "category": self.category,
+            "language": self.language,
             "opened_at": self.opened_at,
             "first_response_at": self.first_response_at,
             "closed_at": closed_at,
@@ -747,6 +750,7 @@ class LiveSession:
         self.customer = case.get("customer")
         self.subject = case.get("subject") or ""
         self.category = case.get("category") or ""
+        self.language = case.get("language") or DEFAULT_LANGUAGE
         self.opened_at = case.get("opened_at")
         self.first_response_at = case.get("first_response_at")
         self.trajectory = list(case.get("trajectory") or [])
@@ -1288,6 +1292,7 @@ def as_customer_case(case, *, with_messages=False):
         "rating_comment": case.get("csat_comment") or "",
         "can_rate": case.get("status") in CLOSED,
         "rating_editable": rating_still_open(case),
+        "language": case.get("language") or DEFAULT_LANGUAGE,
     }
 
     if with_messages:
@@ -1302,9 +1307,21 @@ def as_customer_case(case, *, with_messages=False):
                          or ("AI assistant" if m.get("source") == "ai"
                              else "Support agent")),
                 "is_ai": m.get("speaker") != "customer" and m.get("source") == "ai",
+                # so the thread can show a mic on a dictated message
+                "by_voice": m.get("channel") == "voice",
+                "language": m.get("language") or case.get("language") or DEFAULT_LANGUAGE,
             }
             for m in case.get("messages", [])
         ]
+        # What they are actually writing in, when it is not what they chose.
+        # The page OFFERS a switch and waits; nothing here changes the
+        # language on its own, and nothing is re-translated retrospectively.
+        first = next((m.get("text", "") for m in case.get("messages", [])
+                      if m.get("speaker") == "customer"), "")
+        spotted = languages.detect_language(first)
+        differs = bool(spotted) and spotted != out["language"]
+        out["detected"] = spotted if differs else None
+        out["detected_native"] = languages.native_name(spotted) if differs else None
     return out
 
 
@@ -1401,18 +1418,22 @@ def portal_new_ticket():
         return refused
 
     me = signed_in_username()
+    language = getattr(current_user, "preferred_language", DEFAULT_LANGUAGE)
     sess = LiveSession()
     sess.customer = me
     sess.subject = subject[:120]
     sess.category = category
+    sess.language = language
 
     try:
-        pipeline.run_customer_turn(sess, description)
+        pipeline.run_customer_turn(
+            sess, description, channel=read_channel(body), language=language)
     except Exception as error:
         return failure(error)
 
     case = next((c for c in load_cases() if c.get("id") == sess.case_id), None)
-    return jsonify({"ok": True, "ticket": as_customer_case(case or {})})
+    return jsonify({"ok": True,
+                    "ticket": as_customer_case(case or {}, with_messages=True)})
 
 
 @app.get("/api/portal/cases/<case_id>")
@@ -1422,6 +1443,35 @@ def portal_case(case_id):
     if case is None:
         return jsonify({"ok": False, "error": f"No ticket {case_id}."}), 404
     return jsonify({"ok": True, "ticket": as_customer_case(case, with_messages=True)})
+
+
+@app.get("/api/portal/languages")
+@require_exact("customer")
+def portal_languages():
+    """The picker's options, each in its own script."""
+    return jsonify({"ok": True,
+                    "default": DEFAULT_LANGUAGE,
+                    "selected": languages.normalise(
+                        getattr(current_user, "preferred_language",
+                                DEFAULT_LANGUAGE)),
+                    "languages": [
+                        {"code": code, "native": meta["native"],
+                         "english": meta["english"], "speech": meta["speech"]}
+                        for code, meta in languages.LANGUAGES.items()
+                    ]})
+
+
+@app.post("/api/portal/language")
+@require_exact("customer")
+def portal_set_language():
+    """Remember the language this customer wants to be answered in."""
+    wanted = (request.json or {}).get("language", "")
+    if not languages.is_supported(wanted):
+        return jsonify({"ok": False, "error": "Unknown language."}), 400
+    auth.set_language(signed_in_username(), wanted)
+    return jsonify({"ok": True, "language": wanted,
+                    "native": languages.native_name(wanted),
+                    "speech": languages.speech_code(wanted)})
 
 
 @app.post("/api/portal/cases/<case_id>/rating")
@@ -1466,14 +1516,25 @@ def portal_message(case_id):
         return refused
 
     sess = scoped_session_for(case)
+    language = getattr(current_user, "preferred_language", None) or sess.language
     try:
-        pipeline.run_customer_turn(sess, text)
+        pipeline.run_customer_turn(
+            sess, text, channel=read_channel(request.json or {}),
+            language=language)
     except Exception as error:
         return failure(error)
 
     fresh = customer_case_or_none(case_id, signed_in_username())
+    # What they actually wrote in, if it is not what they chose. The page
+    # OFFERS a switch; nothing changes language on its own.
+    detected = languages.detect_language(text)
     return jsonify({"ok": True,
-                    "ticket": as_customer_case(fresh or {}, with_messages=True)})
+                    "ticket": as_customer_case(fresh or {}, with_messages=True),
+                    "detected": detected if detected and detected != language
+                                else None,
+                    "detected_native": (languages.native_name(detected)
+                                        if detected and detected != language
+                                        else None)})
 
 
 # ==========================================================================

@@ -72,7 +72,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT UNIQUE NOT NULL,
-    email         TEXT,
+    email              TEXT,
+    preferred_language TEXT,
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL,
     display_name  TEXT,
@@ -120,6 +121,9 @@ def connect():
 # a database made before email existed needs the column adding by hand.
 USER_MIGRATIONS = [
     ("email", "ALTER TABLE users ADD COLUMN email TEXT"),
+    # The language a customer is answered in, remembered across sessions.
+    ("preferred_language",
+     "ALTER TABLE users ADD COLUMN preferred_language TEXT"),
 ]
 
 
@@ -167,6 +171,10 @@ class User(UserMixin):
             self.email = row["email"]
         except (IndexError, KeyError):
             self.email = None      # a row from a database not yet migrated
+        try:
+            self.preferred_language = row["preferred_language"] or "en"
+        except (IndexError, KeyError):
+            self.preferred_language = "en"
         self.active = bool(row["active"])
         self.last_login_at = row["last_login_at"]
 
@@ -192,6 +200,7 @@ class User(UserMixin):
             "role": self.role,
             "display_name": self.display_name,
             "email": self.email,
+            "language": self.preferred_language,
             "landing": self.landing,
             "is_customer": self.role == "customer",
             # All four moved up from lead, which no longer exists. Approving a
@@ -288,6 +297,15 @@ def set_role(username, role):
     with connect() as conn:
         conn.execute("UPDATE users SET role = ? WHERE username = ?",
                      (role, str(username).strip().lower()))
+
+
+def set_language(username, code):
+    """Remember the language this person wants to be answered in."""
+    if not find_user(username):
+        raise ValueError(f"No user {username!r}.")
+    with connect() as conn:
+        conn.execute("UPDATE users SET preferred_language = ? WHERE username = ?",
+                     (code, str(username).strip().lower()))
 
 
 def set_email(username, email):
