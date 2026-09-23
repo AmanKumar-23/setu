@@ -241,6 +241,12 @@ class Message:
     # PERSON sent it -- the customer's chat shows this so that an agent
     # taking over from the AI is visible to them rather than silent.
     author: str = ""
+    # Plain English for a message written in another script, shown UNDER the
+    # original in the agent console. It rides on the message rather than being
+    # looked up each time because a translation is a paid call: without this
+    # field, reopening a case would buy the same sentence again, and the
+    # console's own save would throw the stored copy away.
+    gloss_en: str = ""
 
 
 @dataclass
@@ -262,7 +268,8 @@ class ConversationState:
     emotion: str = ""
 
     def add_message(self, speaker: str, text: str, source: str = "human",
-                    channel: str = "typed", author: str = ""):
+                    channel: str = "typed", author: str = "",
+                    gloss_en: str = ""):
         """Add a new message to the conversation history."""
         self.history.append(
             Message(
@@ -270,7 +277,8 @@ class ConversationState:
                 text=text,
                 source=source,
                 channel=channel,
-                author=author
+                author=author,
+                gloss_en=gloss_en
             )
         )
 
@@ -1394,6 +1402,66 @@ The shape of your answer is fixed by the response schema, so just fill it in.
 
         return reading
 
+    def translate_for_agent(self, text: str) -> str:
+        """Plain English for a message the customer wrote in their own script.
+
+        Shown UNDER the original in the agent console, never instead of it --
+        the agent should see what the customer actually said. Metered as its
+        own step ("translate") because it is a real extra call, and the Cost
+        page should not hide it inside the draft.
+        """
+        self._operation = "translate"
+
+        redactor, (cleaned,) = self._clean(text)
+        reply = self._ask_model(
+            "Translate this customer support message into plain English.\n"
+            "Return ONLY the translation, no notes and no quotes.\n"
+            "Keep every order id, refund id, amount and date exactly as "
+            "written, and keep digits in Latin numerals.\n\n"
+            f"{cleaned}"
+        )
+        self.last_redactions = redactor.log()
+        return redactor.restore(reply.strip())
+
+    def translate_lines(self, lines: list, language_note: str) -> list:
+        """Short UI labels in the customer's language, in one call.
+
+        The FAQ card shows six fixed phrases. Translating them one at a time
+        would be six calls for a page load, so they go together and the
+        caller caches the result per language -- a language costs one call
+        for the life of the process, not one per visit. Metered as
+        "translate" like every other extra call.
+
+        Falls back to the English lines if the model returns the wrong shape.
+        A label in the wrong language is a nuisance; a crashed portal is not.
+        """
+        if not lines or not language_note:
+            return list(lines)
+
+        self._operation = "translate"
+
+        numbered = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(lines))
+        reply = self._ask_model(
+            "Translate these customer-support topic labels.\n"
+            f"{language_note}\n"
+            "Keep them SHORT -- they are buttons, not sentences.\n"
+            "Return exactly one translation per line, numbered the same way, "
+            "and nothing else.\n\n"
+            f"{numbered}"
+        )
+
+        out = []
+        for raw in reply.strip().splitlines():
+            text = raw.strip()
+            if not text:
+                continue
+            head, sep, rest = text.partition(".")
+            if sep and head.strip().isdigit():
+                text = rest.strip()
+            out.append(text)
+
+        return out if len(out) == len(lines) else list(lines)
+
     # ---------------- 2. Evaluate agent response ----------------
 
     def evaluate_agent_response(
@@ -1604,8 +1672,17 @@ rather than generalities. Rules:
         customer_message: str,
         conversation_history: Optional[List[Message]] = None,
         analysis: Optional[dict] = None,
-        facts: Optional[list] = None
+        facts: Optional[list] = None,
+        language_note: str = ""
     ) -> str:
+        """`language_note` is the instruction telling the model which language
+        to answer in, built by app/languages.py. Empty means English.
+
+        It is the ONLY multilingual knob in this class. Analysis, lookups and
+        scoring stay in English whatever the customer writes, because the
+        dashboard, the work queue and the knowledge grouping all depend on
+        one vocabulary -- "recharge failed" has to group across languages,
+        and an agent has to be able to read the queue."""
         self._operation = "draft"
 
         # ---- 1. The conversation, written out exactly ONCE ----
@@ -1726,7 +1803,7 @@ Requirements:
 - Write the WHOLE reply in clear, simple English, even when the customer wrote
   in Hinglish. Do not mix languages within a sentence.
 - Keep it under 90 words.
-"""
+{language_note}"""
 
         # This one returns prose, so there is no JSON shape to guarantee. The
         # schema still earns its keep: a single "reply" field makes it
