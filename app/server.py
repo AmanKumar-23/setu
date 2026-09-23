@@ -77,6 +77,8 @@ FAQS = [
     {
         "id": "recharge", "icon": "📱",
         "label": "Recharge failed, money deducted",
+        "question": "My recharge failed but the money was deducted from my "
+                    "account. When will I get it back?",
         "text": "I can see the recharge did not go through even though the "
                 "amount was debited. Let me check the refund for you now.",
         "keywords": ["recharge", "paise cut", "deducted", "prepaid"],
@@ -84,6 +86,8 @@ FAQS = [
     {
         "id": "refund", "icon": "💸",
         "label": "Refund still not received",
+        "question": "My refund has still not reached my account. Where is it "
+                    "and how long does it take?",
         "text": "Thank you for your patience. Let me look up exactly where "
                 "your refund has reached and when it will land.",
         "keywords": ["refund", "money back", "reversal", "paise wapas"],
@@ -91,6 +95,7 @@ FAQS = [
     {
         "id": "delivery", "icon": "📦",
         "label": "Order has not arrived",
+        "question": "My order has not arrived yet. Where is my parcel?",
         "text": "I am sorry your order has not reached you. Let me check "
                 "where the parcel is and what the courier has recorded.",
         "keywords": ["order", "delivery", "deliver", "parcel", "shipment"],
@@ -98,6 +103,8 @@ FAQS = [
     {
         "id": "network", "icon": "📶",
         "label": "Internet / network down",
+        "question": "My internet is not working and the network keeps "
+                    "dropping. What should I do?",
         "text": "Sorry about the connection trouble. Let me check for an "
                 "outage in your area before we try anything on your device.",
         "keywords": ["internet", "network", "signal", "slow", "connection"],
@@ -105,6 +112,8 @@ FAQS = [
     {
         "id": "account", "icon": "🔑",
         "label": "Cannot log in",
+        "question": "I cannot log in to my account. My password is not "
+                    "working and the OTP does not arrive.",
         "text": "Let me get you back into your account. I will check what is "
                 "registered and send a fresh sign-in link.",
         "keywords": ["log in", "login", "password", "otp", "account"],
@@ -112,6 +121,8 @@ FAQS = [
     {
         "id": "escalate", "icon": "⚠️",
         "label": "Threatening to cancel",
+        "question": "This has gone on too long. I want to cancel my account "
+                    "and raise a complaint.",
         "text": "I understand, and I am sorry you have had to ask more than "
                 "once. Let me take ownership of this and get it resolved today.",
         "keywords": ["cancel", "legal", "complaint", "consumer court", "escalate"],
@@ -231,6 +242,7 @@ def init_db():
         conn.executescript(auth.SCHEMA)
         auth.apply_migrations(conn)
         conn.executescript(actions.SCHEMA)
+        conn.executescript(FAQ_MISS_SCHEMA)
         conn.executescript(metering.SCHEMA)
         apply_migrations(conn)
 
@@ -1256,6 +1268,52 @@ CUSTOMER_STATES = {
 CATEGORIES = ["Recharge", "Refund", "Order & Delivery", "Network",
               "Account & Login", "Other"]
 
+FAQ_MISS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS faq_misses (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    at    TEXT NOT NULL,
+    who   TEXT,
+    text  TEXT NOT NULL
+);
+"""
+
+
+def record_unanswered(text, who=None):
+    """Log a question the knowledge base could not answer.
+
+    A FAQ miss raises no ticket, so it has no case to hang off -- and
+    "Questions we cannot answer" reads case["unanswered"]. Rather than invent
+    a case for something nobody raised, misses get their own small table and
+    /api/gaps merges the two. Both are the same fact: a help article somebody
+    still has to write.
+    """
+    text = (text or "").strip()
+    if not text:
+        return
+    try:
+        with connect() as conn:
+            conn.execute(
+                "INSERT INTO faq_misses (at, who, text) VALUES (?, ?, ?)",
+                (now_iso(), who, text))
+    except sqlite3.Error:
+        pass          # a logging failure must not cost the customer an answer
+
+
+def faq_misses():
+    try:
+        with connect() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT at, who, text FROM faq_misses ORDER BY id")]
+    except sqlite3.Error:
+        return []
+
+# The six Knowledge groups, mapped onto the portal's categories, so a ticket
+# raised from a FAQ card lands in the same bucket the dashboard counts.
+FAQ_CATEGORY = {
+    "recharge": "Recharge", "refund": "Refund", "delivery": "Order & Delivery",
+    "network": "Network", "account": "Account & Login", "escalate": "Other",
+}
+
 
 def customer_status_of(case):
     """Which of the three states the customer sees. Nothing else leaks."""
@@ -1472,6 +1530,159 @@ def portal_set_language():
     return jsonify({"ok": True, "language": wanted,
                     "native": languages.native_name(wanted),
                     "speech": languages.speech_code(wanted)})
+
+
+FAQ_HEADING = "Common issues \u2014 find your answer instantly"
+FAQ_SUBHEADING = "Tap one and we will try to answer it straight away."
+
+# The card's fixed words per language, translated once and kept. Without this
+# it would buy the same eight phrases on every page load.
+_FAQ_WORDS = {}
+
+
+def faq_words(language):
+    """The FAQ card's heading, subheading and six labels in `language`.
+
+    All eight go in ONE call and are cached for the life of the process, so a
+    language costs one translation however many customers open the page. The
+    card is decoration around a search: if the translation fails the customer
+    still sees eight working English phrases rather than an error.
+    """
+    english = [FAQ_HEADING, FAQ_SUBHEADING] + [faq["label"] for faq in FAQS]
+    if language == DEFAULT_LANGUAGE:
+        return english
+    if language in _FAQ_WORDS:
+        return _FAQ_WORDS[language]
+
+    try:
+        translated = session.coach.translate_lines(
+            english, languages.reply_instruction(language))
+    except Exception:
+        return english                 # not worth failing the page over
+
+    _FAQ_WORDS[language] = translated
+    return translated
+
+
+@app.get("/api/portal/faqs")
+@require_exact("customer")
+def portal_faqs():
+    """The same six Knowledge groups the dashboard counts, with real counts."""
+    language = languages.normalise(
+        getattr(current_user, "preferred_language", DEFAULT_LANGUAGE))
+    heading, subheading, *labels = faq_words(language)
+    cases = load_cases()
+    blobs = [" ".join([c.get("key_issue", "")]
+                      + [m.get("text", "") for m in c.get("messages", [])]).lower()
+             for c in cases]
+
+    rows = []
+    for faq, label in zip(FAQS, labels, strict=True):
+        rows.append({
+            "id": faq["id"], "icon": faq["icon"], "label": label,
+            "english": faq["label"],
+            "category": FAQ_CATEGORY.get(faq["id"], "Other"),
+            "count": sum(1 for b in blobs
+                         if any(w in b for w in faq["keywords"])),
+        })
+    rows.sort(key=lambda r: -r["count"])
+    return jsonify({"ok": True, "faqs": rows, "language": language,
+                    "heading": heading, "subheading": subheading})
+
+
+@app.post("/api/portal/faq/<faq_id>")
+@require_exact("customer")
+def portal_faq_answer(faq_id):
+    """Try to answer a common issue outright, in the customer's language.
+
+    A confident article means the customer may never need a ticket at all.
+    A miss is logged to the same signal that feeds "Questions we cannot
+    answer", because that is exactly what it is.
+    """
+    faq = next((f for f in FAQS if f["id"] == faq_id), None)
+    if faq is None:
+        return jsonify({"ok": False, "error": "Unknown issue."}), 404
+
+    language = getattr(current_user, "preferred_language", "en")
+    category = FAQ_CATEGORY.get(faq_id, "Other")
+
+    refused = over_budget()
+    if refused:
+        return refused
+
+    article = None
+    try:
+        article = coach_core.find_kb_article(faq["question"])
+    except Exception:
+        article = None            # a search failure is a miss, not a crash
+
+    confident = (article and article.get("how") == "semantic"
+                 and article.get("score", 0) >= pipeline.AUTO_RESOLVE_THRESHOLD)
+
+    if not confident:
+        # The same log the Knowledge section reads.
+        record_unanswered(faq["question"], who=signed_in_username())
+        return jsonify({"ok": True, "answered": False, "category": category})
+
+    try:
+        answer = session.coach.suggest_reply(
+            faq["question"], [], analysis={}, facts=[],
+            language_note=languages.reply_instruction(language))
+    except Exception as error:
+        return failure(error)
+
+    return jsonify({"ok": True, "answered": True, "category": category,
+                    "answer": answer, "topic": article.get("topic"),
+                    "language": language})
+
+
+@app.post("/api/portal/faq/<faq_id>/solved")
+@require_exact("customer")
+def portal_faq_solved(faq_id):
+    """The customer says the article answered it. No ticket is raised.
+
+    Recorded as a CLOSED case rather than a counter of its own, so it lands
+    in the deflection rate the dashboard already computes -- that rate is a
+    share of cases, and a deflection with no case cannot appear in it. The
+    case says plainly what it was: answered from the knowledge base, never
+    raised as a ticket.
+    """
+    faq = next((f for f in FAQS if f["id"] == faq_id), None)
+    if faq is None:
+        return jsonify({"ok": False, "error": "Unknown issue."}), 404
+
+    me = signed_in_username()
+    language = getattr(current_user, "preferred_language", "en")
+    answer = (request.json or {}).get("answer", "")
+
+    stamp = now_iso()
+    case = {
+        "id": next_case_id(load_cases()),
+        "customer": me, "owner": None,
+        "subject": faq["label"], "category": FAQ_CATEGORY.get(faq_id, "Other"),
+        # The subject stays English so the agent console and the Knowledge
+        # grouping keep reading one vocabulary; only the reply is translated.
+        "status": "auto_resolved", "resolution_mode": "ai_autonomous",
+        "opened_at": stamp, "closed_at": stamp, "first_response_at": stamp,
+        "language": language,
+        "escalation_risk": "low", "sentiment": "neutral", "urgency": "low",
+        "frustration": 10, "trend": "flat", "emotion": "Calm",
+        "intent": "Product question", "intent_confidence": None,
+        "key_issue": faq["label"],
+        "turns": 2, "calls": 1, "trajectory": [10],
+        "messages": [
+            {"speaker": "customer", "text": faq["question"], "source": "human",
+             "channel": "typed", "author": ""},
+            {"speaker": "agent", "text": answer, "source": "ai",
+             "channel": "typed", "author": ""},
+        ],
+        "deflected_from_faq": faq["id"],
+        "suggestion": answer, "auto_reply": {"reply": answer, "topic": faq["id"]},
+        "feedback": None, "facts": [], "ratings": [], "redactions": [],
+        "unanswered": [],
+    }
+    save_case(case)
+    return jsonify({"ok": True, "ticket": as_customer_case(case)})
 
 
 @app.post("/api/portal/cases/<case_id>/rating")
@@ -2637,24 +2848,31 @@ def knowledge_gaps():
     """Every question our documentation could not answer, most asked first."""
     grouped = {}
 
-    for case in load_cases():
-        for entry in case.get("unanswered", []):
-            text = (entry.get("text") or "").strip()
-            if not text:
-                continue
+    # Two sources, one meaning: a question nothing we have could answer.
+    # Cases carry theirs inline; a FAQ click that missed raised no ticket, so
+    # it lives in faq_misses -- see record_unanswered().
+    logged = [(case, entry) for case in load_cases()
+              for entry in case.get("unanswered", [])]
+    logged += [(None, miss) for miss in faq_misses()]
 
-            # Group on a squashed version so the same question asked twice
-            # counts twice, but we still display it as it was actually typed.
-            key = " ".join(text.lower().split())
-            row = grouped.setdefault(key, {
-                "text": text, "count": 0, "cases": [], "last_seen": None,
-            })
-            row["count"] += 1
-            if case.get("id") not in row["cases"]:
-                row["cases"].append(case.get("id"))
-            seen = entry.get("at") or case.get("opened_at")
-            if seen and (row["last_seen"] is None or seen > row["last_seen"]):
-                row["last_seen"] = seen
+    for case, entry in logged:
+        text = (entry.get("text") or "").strip()
+        if not text:
+            continue
+
+        # Group on a squashed version so the same question asked twice
+        # counts twice, but we still display it as it was actually typed.
+        key = " ".join(text.lower().split())
+        row = grouped.setdefault(key, {
+            "text": text, "count": 0, "cases": [], "last_seen": None,
+        })
+        row["count"] += 1
+        case_id = case.get("id") if case else None
+        if case_id and case_id not in row["cases"]:
+            row["cases"].append(case_id)
+        seen = entry.get("at") or (case.get("opened_at") if case else None)
+        if seen and (row["last_seen"] is None or seen > row["last_seen"]):
+            row["last_seen"] = seen
 
     rows = sorted(
         grouped.values(),
