@@ -38,6 +38,7 @@ sys.path.insert(0, HERE)
 
 import actions  # noqa: E402  (needs HERE on the path)
 import auth  # noqa: E402
+import languages  # noqa: E402
 import metering  # noqa: E402
 import pipeline  # noqa: E402
 from auth import require_exact, require_role  # noqa: E402
@@ -132,6 +133,9 @@ FAQS = [
 # conversation looks. An angry customer waiting fifteen minutes is a different
 # problem from a calm one waiting four hours, so one flat target would be
 # either far too tight or meaningless.
+# The reply language a case defaults to. Analysis is always English.
+DEFAULT_LANGUAGE = languages.DEFAULT_LANGUAGE
+
 SLA_TARGET_MINUTES = {"high": 15, "medium": 60, "low": 240}
 DEFAULT_SLA_MINUTES = 60          # when we have no risk reading yet
 
