@@ -1,8 +1,12 @@
 <div align="center">
 
-<img src="docs/images/logo.svg" alt="Support Coach" width="440">
+<img src="docs/images/logo.svg" alt="सेतु · Setu" width="440">
 
-### Real-time coaching for customer support agents — built for how India actually writes
+### AI where it's safe. Human where it matters.
+
+**सेतु** (*setu*) is Hindi for **bridge** — which is the whole job: carrying a
+customer across to an answer, and carrying them to a person the moment a
+machine should not be the one deciding.
 
 [![CI](https://github.com/AmanKumar-23/support-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/AmanKumar-23/support-coach/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)

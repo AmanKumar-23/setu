@@ -406,6 +406,22 @@ def now_iso():
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def brand_line():
+    """The product name for the terminal banner.
+
+    A console that cannot encode Devanagari would raise rather than print,
+    and a banner is not worth failing a start-up over, so it falls back to
+    the Latin half of the name.
+    """
+    name = "सेतु · Setu"
+    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        name.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return "Setu"
+    return name
+
+
 def signed_in_username():
     """The current user's name, or None outside a request.
 
@@ -2045,7 +2061,7 @@ def export_actions_csv():
         mimetype="text/csv",
         headers={
             "Content-Disposition":
-                f'attachment; filename="support-coach-actions-{stamp}.csv"'
+                f'attachment; filename="setu-actions-{stamp}.csv"'
         },
     )
 
@@ -2970,7 +2986,7 @@ def export_json():
         json.dumps({"cases": cases}, indent=1),
         mimetype="application/json",
         headers={"Content-Disposition":
-                 f'attachment; filename="support-coach-cases-{stamp}.json"'},
+                 f'attachment; filename="setu-cases-{stamp}.json"'},
     )
 
 
@@ -3020,7 +3036,7 @@ def export_csv():
         mimetype="text/csv",
         headers={
             "Content-Disposition":
-                f'attachment; filename="support-coach-cases-{stamp}.csv"'
+                f'attachment; filename="setu-cases-{stamp}.csv"'
         },
     )
 
@@ -3188,7 +3204,7 @@ if __name__ == "__main__":
     saved = load_cases()
 
     print()
-    print("  AI Support Coach")
+    print("  " + brand_line())
     print("  " + "-" * 46)
     print(f"  key file : {key_file or 'NOT FOUND - see gemini_api_key.txt'}")
     print(f"  model    : {os.getenv('GEMINI_MODEL', 'gemini-3.5-flash-lite')}")

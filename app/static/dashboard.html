@@ -3,7 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Support Coach — Dashboard</title>
+<meta name="description" content="Setu — AI customer support for India. AI where it's safe. Human where it matters.">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.png" sizes="32x32" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@600;700&display=swap" rel="stylesheet">
+<title>Dashboard · Setu</title>
 <style>
 :root{
   --bg:#F5F4F1; --surface:#FFFFFF; --surface-2:#FAFAF8; --surface-3:#F2F1ED;
@@ -38,12 +44,23 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14p
   z-index:20}
 .brand{display:flex;align-items:center;gap:11px}
 .logo{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
-  color:#fff;font-weight:800;font-size:14px;letter-spacing:-.02em;
+  color:#fff;font-weight:800;font-size:21px;letter-spacing:-.02em;
   background:linear-gradient(140deg,#FF6B3D,var(--brand) 55%,#D8401F);
   box-shadow:0 3px 10px rgba(239,78,43,.34)}
 .bname{font-size:15.5px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
 .btag{font-size:10.5px;color:var(--ink-3);font-weight:600;letter-spacing:.09em;
-  text-transform:uppercase;margin-top:1px}
+  text-transform:uppercase;margin-top:1px;white-space:nowrap}
+
+/* ---------- the brand mark ----------
+   "से" and "सेतु" are real text, never an image: they stay selectable,
+   scale with the page and never blur on a retina screen. Devanagari sits
+   high in its em box, so a geometrically centred glyph reads as lifted --
+   the nudge leaves the शिरोरेखा an even distance from the badge edge. The
+   weight is inherited so "सेतु" and "· Setu" sit at the same weight and
+   on the same baseline. */
+.dev{font-family:"Noto Sans Devanagari","Mukta","Nirmala UI","Mangal",sans-serif}
+.logo .dev{display:block;line-height:1;font-weight:700;
+  transform:translateY(3px)}
 .grow{flex:1}
 .nav{display:flex;gap:4px;background:var(--surface-3);border:1px solid var(--line);
   border-radius:11px;padding:3px}
@@ -592,9 +609,9 @@ tbody tr{cursor:pointer}
 
 <div class="appbar">
   <div class="brand">
-    <div class="logo">SC</div>
+    <div class="logo"><span class="dev">से</span></div>
     <div>
-      <div class="bname">Support Coach</div>
+      <div class="bname"><span class="dev">सेतु</span> · Setu</div>
       <div class="btag">Dashboard</div>
     </div>
   </div>
@@ -2154,7 +2171,7 @@ function exportJSON(id, title){
   };
   download(new Blob([JSON.stringify(payload, null, 2)],
                     {type:"application/json"}),
-           `support-coach-${id}-${chartRange}-${stamp()}.json`);
+           `setu-${id}-${chartRange}-${stamp()}.json`);
 }
 
 /* Inline every computed paint property onto a clone.
@@ -2210,7 +2227,7 @@ function exportPNG(id, title){
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(blob => {
       if(!blob){ toast("Export failed", "The browser could not make a PNG."); return; }
-      download(blob, `support-coach-${id}-${chartRange}-${stamp()}.png`);
+      download(blob, `setu-${id}-${chartRange}-${stamp()}.png`);
     }, "image/png");
   };
   image.onerror = () => toast("Export failed", "The chart could not be rendered.");

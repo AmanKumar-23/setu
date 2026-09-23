@@ -1,4 +1,4 @@
-/* Support Coach — language + voice, shared by /portal and /portal/chat.
+/* सेतु · Setu — language + voice, shared by /portal and /portal/chat.
  *
  * Browser APIs only: SpeechRecognition for dictation, speechSynthesis for
  * playback. Neither is universal, so every entry point here feature-detects

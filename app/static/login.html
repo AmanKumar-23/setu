@@ -3,7 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in — Support Coach</title>
+<meta name="description" content="Setu — AI customer support for India. AI where it's safe. Human where it matters.">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.png" sizes="32x32" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@600;700&display=swap" rel="stylesheet">
+<title>Sign in · Setu</title>
 <style>
 :root{
   --bg:#F5F4F1; --surface:#FFFFFF; --surface-2:#FAFAF8; --surface-3:#F2F1ED;
@@ -42,10 +48,20 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14p
 
 .mark{display:flex;align-items:center;gap:12px;margin-bottom:auto}
 .mark .logo{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;
-  color:#fff;font-weight:800;font-size:15px;letter-spacing:-.02em;
+  color:#fff;font-weight:800;font-size:25px;letter-spacing:-.02em;
   background:linear-gradient(140deg,#FF7A52,var(--brand) 58%,#C9381A);
   box-shadow:0 6px 20px rgba(239,78,43,.46)}
 .mark .wm{font-size:16px;font-weight:700;letter-spacing:-.02em}
+/* ---------- the brand mark ----------
+   "से" and "सेतु" are real text, never an image: they stay selectable,
+   scale with the page and never blur on a retina screen. Devanagari sits
+   high in its em box, so a geometrically centred glyph reads as lifted --
+   the nudge leaves the शिरोरेखा an even distance from the badge edge. The
+   weight is inherited so "सेतु" and "· Setu" sit at the same weight and
+   on the same baseline. */
+.dev{font-family:"Noto Sans Devanagari","Mukta","Nirmala UI","Mangal",sans-serif}
+.logo .dev{display:block;line-height:1;font-weight:700;
+  transform:translateY(3px)}
 .mark .wt{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
   color:rgba(255,255,255,.42);margin-top:2px}
 
@@ -138,12 +154,16 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14p
 .pane{display:grid;place-items:center;padding:40px 30px;background:var(--bg)}
 .form{width:100%;max-width:372px}
 
-.crest{display:none;align-items:center;gap:11px;margin-bottom:26px}
-.crest .logo{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;
-  color:#fff;font-weight:800;font-size:14px;
+.crest{display:flex;flex-direction:column;align-items:center;gap:11px;
+  margin-bottom:26px;text-align:center}
+.crest .logo{width:56px;height:56px;border-radius:18px;display:grid;place-items:center;
+  color:#fff;font-weight:800;font-size:35px;
   background:linear-gradient(140deg,#FF7A52,var(--brand) 58%,#C9381A);
   box-shadow:0 4px 14px rgba(239,78,43,.34)}
-.crest .wm{font-size:15.5px;font-weight:700;letter-spacing:-.02em}
+.crest .wm{font-size:20px;font-weight:700;letter-spacing:-.025em}
+/* One line on a desktop pane, allowed to wrap on a phone. */
+.crest .tagline{font-size:12.5px;font-weight:500;color:var(--ink-3);
+  line-height:1.5;max-width:34ch}
 
 /* ---------- role cards ---------- */
 .rolelab{font-size:10.5px;font-weight:700;letter-spacing:.13em;
@@ -243,7 +263,7 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
 @media (max-width:1000px){
   .split{grid-template-columns:1fr}
   .story{display:none}
-  .crest{display:flex}
+  /* .crest is a centred column at every width now; nothing to switch on. */
   .pane{min-height:100vh;align-items:center}
 }
 @media (max-width:420px){
@@ -263,9 +283,9 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
   <!-- ---------------- the pitch ---------------- -->
   <section class="story">
     <div class="mark">
-      <div class="logo">SC</div>
+      <div class="logo"><span class="dev">से</span></div>
       <div>
-        <div class="wm">Support Coach</div>
+        <div class="wm"><span class="dev">सेतु</span> · Setu</div>
         <div class="wt">Built for Bharat</div>
       </div>
     </div>
@@ -291,7 +311,7 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
       </div>
       <div class="read good" data-step="2">
         <span class="ic">✓</span>
-        <span class="who">Support Coach</span>
+        <span class="who"><span class="dev">सेतु</span> · Setu</span>
         <span class="verdict">negative · 85/100 · high</span>
       </div>
 
@@ -326,8 +346,9 @@ button[type=submit]:disabled{opacity:.68;cursor:not-allowed;box-shadow:none;
     <form class="form" id="form" autocomplete="on">
 
       <div class="crest">
-        <div class="logo">SC</div>
-        <div class="wm">Support Coach</div>
+        <div class="logo"><span class="dev">से</span></div>
+        <div class="wm"><span class="dev">सेतु</span> · Setu</div>
+        <div class="tagline">AI where it&rsquo;s safe. Human where it matters.</div>
       </div>
 
       <div class="modes" id="modes" role="group" aria-label="Sign in or create an account">
