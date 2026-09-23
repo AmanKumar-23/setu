@@ -84,6 +84,34 @@ main{flex:1;padding:22px 24px 30px;display:flex;justify-content:center;min-heigh
   color:#C97A00;background:#FDF2E0;border:1px solid #F3DDB4;border-radius:999px;
   padding:6px 14px;font-weight:600}
 
+/* ---------- rating ---------- */
+.rate{flex:0 0 auto;margin-top:14px;background:var(--surface);
+  border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh-1);
+  padding:16px 18px}
+.rate.done{background:#E7F5EC;border-color:#BFE3CD}
+.rate h3{font-size:14px;font-weight:750;letter-spacing:-.01em;margin-bottom:3px}
+.rate .sub{font-size:12.5px;color:var(--ink-3);margin-bottom:13px}
+.stars{display:flex;gap:5px;margin-bottom:12px}
+.star{width:38px;height:38px;border-radius:11px;border:1px solid var(--line-2);
+  background:var(--surface-2);cursor:pointer;font-size:19px;line-height:1;
+  display:grid;place-items:center;transition:.14s;color:var(--ink-3)}
+.star:hover{border-color:#F0A88F;transform:translateY(-1px)}
+.star.on{background:#FFF6E5;border-color:#F0C674;color:#E8A317}
+.rate textarea{width:100%;min-height:62px;resize:vertical;padding:10px 12px;
+  border-radius:11px;border:1px solid var(--line-2);background:var(--surface-2);
+  color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.55;
+  outline:none;transition:.15s;margin-bottom:11px}
+.rate textarea:focus{border-color:#F0A88F;background:var(--surface);
+  box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
+.rate .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rate .msg{font-size:12.5px;color:var(--ink-2)}
+.rate .err{color:#D6382F;font-weight:600}
+.given{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.given .shown{font-size:19px;letter-spacing:2px;color:#E8A317}
+.given .words{font-size:13px;color:var(--ink-2);font-style:italic}
+.linkish{background:none;border:0;padding:0;color:var(--brand);font-size:12.5px;
+  font-weight:650;cursor:pointer;font-family:var(--sans);text-decoration:underline}
+
 .composer{flex:0 0 auto;margin-top:14px;display:flex;gap:10px;align-items:flex-end}
 textarea{flex:1;min-height:44px;max-height:140px;resize:none;padding:12px 14px;
   border-radius:13px;border:1px solid var(--line-2);background:var(--surface);
@@ -135,6 +163,8 @@ textarea:focus{border-color:#F0A88F;box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
     </div>
 
     <div class="thread" id="thread"></div>
+
+    <div class="rate" id="rateCard" hidden></div>
 
     <div class="composer">
       <textarea id="input" rows="1" placeholder="Type your message&hellip;"></textarea>
@@ -190,6 +220,93 @@ function render(t){
   }
 
   thread.scrollTop = thread.scrollHeight;
+  renderRating(t);
+}
+
+let picked = 0;
+
+/* Only ever shown on a closed ticket. The server decides that -- can_rate --
+   so this page never has to reason about statuses it should not know. */
+function renderRating(t){
+  const card = $("rateCard");
+  if(!t.can_rate){ card.hidden = true; return; }
+  card.hidden = false;
+
+  // Already rated and the window has closed: show it, read only.
+  if(t.rating && !t.rating_editable){
+    card.className = "rate done";
+    card.innerHTML = `<h3>Thanks for rating this</h3>
+      <div class="given">
+        <span class="shown">${"★".repeat(t.rating)}${"☆".repeat(5 - t.rating)}</span>
+        <span class="words" data-words></span>
+      </div>`;
+    card.querySelector("[data-words]").textContent = t.rating_comment || "";
+    return;
+  }
+
+  const rated = Boolean(t.rating);
+  picked = t.rating || 0;
+  card.className = "rate" + (rated ? " done" : "");
+  card.innerHTML = `
+    <h3>${rated ? "Thanks — you rated this" : "Was your issue resolved?"}</h3>
+    <div class="sub">${rated
+      ? "You can change this for 24 hours after rating."
+      : "Tell us how it went. One tap, and a line if you want to."}</div>
+    <div class="stars" id="stars" role="group" aria-label="Rate from 1 to 5">
+      ${[1,2,3,4,5].map(n => `<button type="button" class="star" data-n="${n}"
+          aria-label="${n} star${n === 1 ? "" : "s"}">★</button>`).join("")}
+    </div>
+    <textarea id="rateNote" maxlength="280"
+      placeholder="Anything you want to add? (optional)"></textarea>
+    <div class="row">
+      <button class="send" id="rateSend" style="height:36px;padding:0 16px;
+        font-size:12.5px">${rated ? "Update rating" : "Send rating"}</button>
+      <span class="msg" id="rateMsg"></span>
+    </div>`;
+
+  $("rateNote").value = t.rating_comment || "";
+  paintStars();
+
+  card.querySelectorAll(".star").forEach(b => {
+    b.onclick = () => { picked = Number(b.dataset.n); paintStars(); };
+  });
+  $("rateSend").onclick = sendRating;
+}
+
+function paintStars(){
+  document.querySelectorAll("#stars .star").forEach(b =>
+    b.classList.toggle("on", Number(b.dataset.n) <= picked));
+}
+
+async function sendRating(){
+  const msg = $("rateMsg");
+  msg.className = "msg";
+  if(!picked){
+    msg.className = "msg err";
+    msg.textContent = "Pick a star first.";
+    return;
+  }
+
+  $("rateSend").disabled = true;
+  msg.textContent = "Sending…";
+  try{
+    const d = await (await fetch(`/api/portal/cases/${CASE_ID}/rating`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({score: picked, comment: $("rateNote").value.trim()}),
+    })).json();
+
+    if(!d.ok){
+      msg.className = "msg err";
+      msg.textContent = d.error || "Could not save that.";
+      $("rateSend").disabled = false;
+      return;
+    }
+    render(d.ticket);            // repaints the card in its "rated" state
+  }catch(e){
+    msg.className = "msg err";
+    msg.textContent = "Could not reach the server.";
+    $("rateSend").disabled = false;
+  }
 }
 
 async function load(){

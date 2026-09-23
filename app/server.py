@@ -1259,6 +1259,12 @@ def as_customer_case(case, *, with_messages=False):
         "status_tone": CUSTOMER_STATES[state]["tone"],
         "updated_at": case.get("updated_at") or case.get("opened_at"),
         "opened_at": case.get("opened_at"),
+        # Their own rating and their own words. Safe to return for the same
+        # reason their own messages are: they wrote it.
+        "rating": case.get("csat_score"),
+        "rating_comment": case.get("csat_comment") or "",
+        "can_rate": case.get("status") in CLOSED,
+        "rating_editable": rating_still_open(case),
     }
 
     if with_messages:
@@ -1277,6 +1283,21 @@ def as_customer_case(case, *, with_messages=False):
             for m in case.get("messages", [])
         ]
     return out
+
+
+def rating_still_open(case):
+    """Whether this rating can still be given or changed.
+
+    A closed case with no rating is open for one; a rated one stays editable
+    for CSAT_EDIT_HOURS from the FIRST rating, which is the same window
+    record_csat() enforces -- this only tells the page what to draw.
+    """
+    if case.get("status") not in CLOSED:
+        return False
+    first = parse_time(case.get("csat_at"))
+    if first is None:
+        return True
+    return (datetime.now(UTC) - first).total_seconds() <= CSAT_EDIT_HOURS * 3600
 
 
 def cases_for_customer(username):
@@ -1378,6 +1399,31 @@ def portal_case(case_id):
     if case is None:
         return jsonify({"ok": False, "error": f"No ticket {case_id}."}), 404
     return jsonify({"ok": True, "ticket": as_customer_case(case, with_messages=True)})
+
+
+@app.post("/api/portal/cases/<case_id>/rating")
+@require_exact("customer")
+def portal_rate(case_id):
+    """The customer rates their own ticket.
+
+    The agent-side /api/cases/<id>/csat cannot serve this: it is guarded by
+    require_role("agent"), and a customer sits below that on purpose. Rather
+    than widen that guard, this route answers "is it yours" the way the rest
+    of the portal does -- and both call the SAME record_csat(), so the rules
+    about stars, comments and the 24-hour window have one implementation.
+    """
+    case = customer_case_or_none(case_id, signed_in_username())
+    if case is None:
+        return jsonify({"ok": False, "error": f"No ticket {case_id}."}), 404
+
+    body = request.json or {}
+    updated, why = record_csat(case, body.get("score"), body.get("comment", ""))
+    if updated is None:
+        return jsonify({"ok": False, "error": why}), 400
+
+    save_case(updated)
+    return jsonify({"ok": True,
+                    "ticket": as_customer_case(updated, with_messages=True)})
 
 
 @app.post("/api/portal/cases/<case_id>/message")

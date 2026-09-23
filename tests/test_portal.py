@@ -179,3 +179,69 @@ class _FakeCoach:
 
     def suggest_reply(self, *a, **k):
         return "draft for the agent"
+
+
+# --------------------------------------------------------------------------
+# Rating your own ticket
+# --------------------------------------------------------------------------
+def test_a_customer_can_rate_their_resolved_ticket(client, tickets, srv):
+    sign_in(client, "priya", "customer-pw")
+    reply = client.post("/api/portal/cases/SC-MINE/rating",
+                        json={"score": 5, "comment": "sorted in minutes"})
+    assert reply.status_code == 200
+
+    ticket = reply.get_json()["ticket"]
+    assert ticket["rating"] == 5
+    assert ticket["rating_comment"] == "sorted in minutes"
+    assert next(c for c in srv.load_cases() if c["id"] == "SC-MINE")["csat_score"] == 5
+
+
+def test_an_open_ticket_cannot_be_rated_yet(client, tickets):
+    """record_csat() refuses it, and can_rate tells the page not to ask."""
+    sign_in(client, "priya", "customer-pw")
+    assert client.post("/api/portal/cases/SC-OPEN/rating",
+                       json={"score": 5}).status_code == 400
+    ticket = client.get("/api/portal/cases/SC-OPEN").get_json()["ticket"]
+    assert ticket["can_rate"] is False
+
+
+def test_you_cannot_rate_somebody_elses_ticket(client, tickets):
+    sign_in(client, "priya", "customer-pw")
+    assert client.post("/api/portal/cases/SC-THEIRS/rating",
+                       json={"score": 1}).status_code == 404
+
+
+@pytest.mark.parametrize("score", [0, 6, -1, "five", None, 2.5])
+def test_only_one_to_five_stars_are_accepted(client, tickets, score):
+    sign_in(client, "priya", "customer-pw")
+    assert client.post("/api/portal/cases/SC-MINE/rating",
+                       json={"score": score}).status_code == 400
+
+
+def test_a_rating_can_be_changed_inside_the_window(client, tickets):
+    sign_in(client, "priya", "customer-pw")
+    client.post("/api/portal/cases/SC-MINE/rating", json={"score": 2})
+    again = client.post("/api/portal/cases/SC-MINE/rating",
+                        json={"score": 5, "comment": "they fixed it"})
+    assert again.get_json()["ticket"]["rating"] == 5
+
+
+def test_the_portal_and_the_agent_side_share_one_set_of_rules(srv, case):
+    """Both routes call record_csat(), so the stars, the comment limit and
+    the 24-hour window cannot drift apart."""
+    from datetime import UTC, datetime, timedelta
+    rated, _ = srv.record_csat(case(status="resolved"), 4, "fine")
+    assert rated["csat_score"] == 4
+    stale, why = srv.record_csat(rated, 5,
+                                 now=datetime.now(UTC) + timedelta(hours=25))
+    assert stale is None and "no longer be changed" in why
+
+
+def test_a_rating_reaches_the_dashboard_numbers(client, tickets, srv):
+    """It is the same case log, so CSAT on the Overview moves with it."""
+    sign_in(client, "priya", "customer-pw")
+    client.post("/api/portal/cases/SC-MINE/rating", json={"score": 4})
+
+    summary = srv.csat_summary(srv.load_cases())
+    assert summary["count"] == 1
+    assert summary["average"] == 4.0
