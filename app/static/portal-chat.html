@@ -112,7 +112,78 @@ main{flex:1;padding:22px 24px 30px;display:flex;justify-content:center;min-heigh
 .linkish{background:none;border:0;padding:0;color:var(--brand);font-size:12.5px;
   font-weight:650;cursor:pointer;font-family:var(--sans);text-decoration:underline}
 
+/* ---------- header controls ---------- */
+.hctl{display:flex;align-items:center;gap:8px;margin-right:4px}
+.lang{height:34px;padding:0 30px 0 11px;border-radius:10px;border:1px solid var(--line-2);
+  background:var(--surface) url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238B929B' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color:var(--ink);font-family:var(--sans);font-size:13px;font-weight:600;
+  cursor:pointer;appearance:none;outline:none;transition:.15s}
+.lang:hover{border-color:var(--brand)}
+.lang:focus{border-color:#F0A88F;box-shadow:0 0 0 3px rgba(239,78,43,.11)}
+.vtoggle{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;
+  border-radius:10px;border:1px solid var(--line-2);background:var(--surface);
+  color:var(--ink-2);font-size:12px;font-weight:650;cursor:pointer;
+  font-family:var(--sans);transition:.15s;white-space:nowrap}
+.vtoggle:hover{border-color:var(--brand);color:var(--brand)}
+.vtoggle[aria-pressed="false"]{opacity:.6}
+.vdot{width:7px;height:7px;border-radius:50%;background:#0B8A4B;display:block}
+.vtoggle[aria-pressed="false"] .vdot{background:var(--ink-3)}
+
+/* ---------- per-message voice ---------- */
+.who .viamic{margin-left:5px;opacity:.75;letter-spacing:0}
+.play{margin-top:6px;align-self:flex-start;height:26px;padding:0 10px;border-radius:8px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);
+  font-family:var(--sans);font-size:11px;font-weight:650;cursor:pointer;transition:.15s}
+.play:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-bg)}
+.play[data-on="1"]{background:var(--brand);border-color:var(--brand);color:#fff}
+
+/* ---------- the offer to switch language ---------- */
+.offer{flex:0 0 auto;margin-top:12px;display:flex;align-items:center;gap:10px;
+  flex-wrap:wrap;padding:11px 14px;border-radius:13px;
+  border:1px solid #CBD9F0;background:#EEF4FD}
+.offer .q{flex:1;min-width:190px;font-size:13px;font-weight:600;color:var(--ink)}
+.offer button{height:30px;padding:0 13px;border-radius:9px;border:1px solid var(--line-2);
+  background:var(--surface);color:var(--ink-2);font-family:var(--sans);
+  font-size:12px;font-weight:650;cursor:pointer;transition:.15s}
+.offer button:hover{border-color:var(--brand);color:var(--brand)}
+.offer button.yes{background:var(--brand);border-color:var(--brand);color:#fff}
+.offer button.yes:hover{filter:brightness(1.05);color:#fff}
+
+/* ---------- the player bar ---------- */
+.player{flex:0 0 auto;margin-top:12px;display:flex;align-items:center;gap:11px;
+  padding:9px 13px;border-radius:13px;border:1px solid var(--line);
+  background:var(--surface-2)}
+.player .pbtn{height:30px;padding:0 13px;border-radius:9px;border:1px solid var(--brand);
+  background:var(--brand);color:#fff;font-family:var(--sans);font-size:12px;
+  font-weight:700;cursor:pointer;transition:.15s;flex:0 0 auto}
+.player .pbtn:hover{filter:brightness(1.05)}
+.player .pwhat{flex:1;min-width:0;font-size:12px;color:var(--ink-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.player .plang{flex:0 0 auto;font-size:11px;font-weight:700;color:var(--ink-2);
+  background:var(--surface);border:1px solid var(--line-2);border-radius:7px;
+  padding:3px 8px}
+
+.mic{width:42px;height:42px;flex:0 0 42px;border-radius:12px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);
+  font-size:16px;cursor:pointer;display:grid;place-items:center;transition:.15s}
+.mic:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-bg)}
+.mic[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#fff;
+  animation:micpulse 1.4s ease-out infinite}
+@keyframes micpulse{70%{box-shadow:0 0 0 12px rgba(239,78,43,0)}
+  100%{box-shadow:0 0 0 0 rgba(239,78,43,0)}}
+.mic:disabled{opacity:.4;cursor:not-allowed}
+.ghost{flex:0 0 auto;margin-top:7px;font-size:13px;color:var(--ink-3);
+  font-style:italic;line-height:1.5}
+.lowconf{flex:0 0 auto;margin-top:7px;font-size:11.5px;font-weight:600;color:#C97A00;
+  background:#FDF2E0;border-radius:9px;padding:6px 10px;align-self:flex-start}
+
 .composer{flex:0 0 auto;margin-top:14px;display:flex;gap:10px;align-items:flex-end}
+.composer textarea{flex:1;min-width:0}
+
+/* Every display: rule above is declared after the UA's [hidden]{display:none}
+   and beats it on equal specificity, so hidden alone would not hide them. */
+.offer[hidden],.player[hidden],.ghost[hidden],.lowconf[hidden],
+.play[hidden],.me[hidden],.rate[hidden]{display:none}
 textarea{flex:1;min-height:44px;max-height:140px;resize:none;padding:12px 14px;
   border-radius:13px;border:1px solid var(--line-2);background:var(--surface);
   color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.55;
@@ -142,6 +213,12 @@ textarea:focus{border-color:#F0A88F;box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
     </div>
   </div>
   <div class="grow"></div>
+  <div class="hctl">
+    <select class="lang" id="langPick" aria-label="Language"></select>
+    <button class="vtoggle" id="voiceToggle" aria-pressed="true"
+            title="Turn voice controls off">
+      <span class="vdot"></span>Voice</button>
+  </div>
   <div class="me" id="me" hidden>
     <span class="av" id="meAv">?</span>
     <span>
@@ -164,19 +241,38 @@ textarea:focus{border-color:#F0A88F;box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
 
     <div class="thread" id="thread"></div>
 
+    <div class="offer" id="offer" hidden>
+      <span class="q" id="offerQ"></span>
+      <button class="yes" id="offerYes">Yes, switch</button>
+      <button id="offerNo">No, keep English</button>
+    </div>
+
     <div class="rate" id="rateCard" hidden></div>
+
+    <div class="player" id="player" hidden>
+      <button class="pbtn" id="playerBtn">&#9654; Play latest reply</button>
+      <span class="pwhat" id="playerWhat"></span>
+      <span class="plang" id="playerLang"></span>
+    </div>
+
+    <div class="ghost" id="ghost" hidden></div>
+    <div class="lowconf" id="lowconf" hidden></div>
 
     <div class="composer">
       <textarea id="input" rows="1" placeholder="Type your message&hellip;"></textarea>
+      <button class="mic" id="mic" aria-pressed="false"
+              title="Speak instead of typing">&#127908;</button>
       <button class="send" id="sendBtn">Send</button>
     </div>
   </div>
 </main>
 
+<script src="/static/voice.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const CASE_ID = location.pathname.split("/").filter(Boolean).pop();
 let busy = false;
+let spoken = false;     // did the text in the box arrive by voice?
 
 /* Everything on this page comes from as_customer_case(). There is no field
    here for sentiment, risk, gates, scores or lookups, because the server
@@ -198,6 +294,14 @@ function render(t){
     const who = document.createElement("div");
     who.className = "who";
     who.textContent = m.from;
+    if(m.by_voice){
+      // So it is obvious later which lines were spoken rather than typed.
+      const mic = document.createElement("span");
+      mic.className = "viamic";
+      mic.textContent = "\uD83C\uDF99";
+      mic.title = "Sent by voice";
+      who.appendChild(mic);
+    }
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";
@@ -205,6 +309,8 @@ function render(t){
 
     turn.appendChild(who);
     turn.appendChild(bubble);
+
+    if(m.is_ai) turn.appendChild(playButton(m.text, m.language));
     thread.appendChild(turn);
   });
 
@@ -221,6 +327,77 @@ function render(t){
 
   thread.scrollTop = thread.scrollHeight;
   renderRating(t);
+  renderPlayer(t);
+  renderOffer(t);
+}
+
+/* ---------------- audio playback ----------------
+   One button per AI reply, plus a bar that always holds the newest one.
+   Only one utterance is ever in flight: SC.speak cancels whatever is
+   playing before it starts. */
+
+function playButton(text, lang){
+  const b = document.createElement("button");
+  b.className = "play";
+  b.type = "button";
+  b.textContent = "\u25B6 Play";
+  b.hidden = !(SC.canSpeak && SC.voiceOn);
+  b.dataset.play = "1";
+  b.onclick = () => {
+    if(b.dataset.on === "1"){ SC.stop(); return; }
+    SC.speak(text, lang,
+             () => { b.dataset.on = "1"; b.textContent = "\u25A0 Stop"; },
+             () => { b.dataset.on = "";  b.textContent = "\u25B6 Play"; });
+  };
+  return b;
+}
+
+let latest = null;              // {text, language} -- what the bar plays
+
+function renderPlayer(t){
+  const msgs = (t.messages || []).filter(m => m.is_ai);
+  latest = msgs.length ? msgs[msgs.length - 1] : null;
+  const bar = $("player");
+  if(!latest || !SC.canSpeak || !SC.voiceOn){ bar.hidden = true; return; }
+  bar.hidden = false;
+  $("playerWhat").textContent = latest.text;
+  $("playerLang").textContent = SC.nativeName(latest.language);
+}
+
+$("playerBtn").onclick = () => {
+  if(!latest) return;
+  const b = $("playerBtn");
+  if(b.dataset.on === "1"){ SC.stop(); return; }
+  SC.speak(latest.text, latest.language,
+           () => { b.dataset.on = "1"; b.innerHTML = "\u25A0 Stop"; },
+           () => { b.dataset.on = "";  b.innerHTML = "\u25B6 Play latest reply"; });
+};
+
+/* ---------------- the offer to switch language ----------------
+   Shown once per ticket, and only when what the customer WROTE is not the
+   language we are ANSWERING in. Accepting changes the language from here on;
+   nothing already sent is rewritten, and nothing switches on its own. */
+
+function offerKey(){ return "sc.langoffer." + CASE_ID; }
+
+function renderOffer(t){
+  const box = $("offer");
+  if(!t.detected || SC.get(offerKey(), "") === t.detected){
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  $("offerQ").textContent = "Reply in " + t.detected_native + " instead?";
+  $("offerNo").textContent = "No, keep " + SC.nativeName();
+
+  const settle = () => { SC.set(offerKey(), t.detected); box.hidden = true; };
+  $("offerYes").onclick = () => {
+    settle();
+    SC.setLanguage(t.detected);
+    const pick = $("langPick");
+    if(pick) pick.value = t.detected;
+  };
+  $("offerNo").onclick = settle;
 }
 
 let picked = 0;
@@ -321,6 +498,12 @@ async function send(){
   const text = $("input").value.trim();
   if(busy || !text) return;
 
+  SC.stopDictation();
+  const channel = spoken ? "voice" : "typed";
+  spoken = false;
+  $("ghost").hidden = true;
+  $("lowconf").hidden = true;
+
   busy = true;
   $("sendBtn").disabled = true;
   $("sendBtn").innerHTML = '<span class="spin"></span>Sending';
@@ -336,7 +519,7 @@ async function send(){
   try{
     const d = await (await fetch(`/api/portal/cases/${CASE_ID}/message`, {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({text}),
+      body: JSON.stringify({text, channel}),
     })).json();
     if(d.ok) render(d.ticket); else await load();
   }catch(e){ await load(); }
@@ -376,6 +559,32 @@ $("signOut").onclick = async () => {
   await fetch("/api/logout", {method: "POST"}).catch(() => {});
   location.href = "/login";
 };
+
+/* ---------------- language + voice ---------------- */
+
+SC.mountVoiceToggle($("voiceToggle"));
+
+const mic = SC.attachMic($("mic"), $("input"), {
+  ghost: $("ghost"),
+  hint: $("lowconf"),
+  onVoice: () => { spoken = true; },       // never sends; only labels
+});
+
+SC.onVoiceChange(on => {
+  on ? mic.enable() : mic.disable();
+  if(!on) SC.stop();
+  $("player").hidden = !(on && latest && SC.canSpeak);
+  document.querySelectorAll("[data-play]").forEach(b => {
+    b.hidden = !(on && SC.canSpeak);
+  });
+});
+
+SC.mountPicker($("langPick"), code => {
+  if(SC.canDictate && !$("mic").disabled){
+    $("mic").title = "Speak in " + SC.nativeName(code);
+  }
+  if(latest) $("playerLang").textContent = SC.nativeName(latest.language);
+});
 </script>
 </body>
 </html>

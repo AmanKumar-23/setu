@@ -91,12 +91,72 @@ tbody tr:hover{background:var(--surface-2)}
 .empty h2{font-size:18px;font-weight:750;letter-spacing:-.02em;margin-bottom:8px}
 .empty p{font-size:13.5px;color:var(--ink-2);line-height:1.65;margin-bottom:22px}
 
+/* ---------- header controls ---------- */
+.hctl{display:flex;align-items:center;gap:8px;margin-right:4px}
+.lang{height:34px;padding:0 30px 0 11px;border-radius:10px;border:1px solid var(--line-2);
+  background:var(--surface) url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238B929B' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color:var(--ink);font-family:var(--sans);font-size:13px;font-weight:600;
+  cursor:pointer;appearance:none;outline:none;transition:.15s}
+.lang:hover{border-color:var(--brand)}
+.lang:focus{border-color:#F0A88F;box-shadow:0 0 0 3px rgba(239,78,43,.11)}
+.vtoggle{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;
+  border-radius:10px;border:1px solid var(--line-2);background:var(--surface);
+  color:var(--ink-2);font-size:12px;font-weight:650;cursor:pointer;
+  font-family:var(--sans);transition:.15s;white-space:nowrap}
+.vtoggle:hover{border-color:var(--brand);color:var(--brand)}
+.vtoggle[aria-pressed="false"]{opacity:.6}
+.vdot{width:7px;height:7px;border-radius:50%;background:#0B8A4B;display:block}
+.vtoggle[aria-pressed="false"] .vdot{background:var(--ink-3)}
+
+/* ---------- common issues ---------- */
+.faqs{background:var(--surface);border:1px solid var(--line);border-radius:18px;
+  box-shadow:var(--sh-2);padding:18px 20px;margin-bottom:18px}
+.faqs h2{font-size:15px;font-weight:750;letter-spacing:-.015em;margin-bottom:3px}
+.faqs .sub{font-size:12.5px;color:var(--ink-3);margin-bottom:14px}
+.faqgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(224px,1fr));gap:9px}
+.faq{display:flex;align-items:center;gap:10px;padding:11px 13px;border-radius:12px;
+  border:1px solid var(--line-2);background:var(--surface-2);cursor:pointer;
+  text-align:left;font-family:var(--sans);transition:.14s}
+.faq:hover{border-color:var(--brand);background:var(--brand-bg);transform:translateY(-1px)}
+.faq .em{font-size:16px;line-height:1;flex:0 0 auto}
+.faq .lab{flex:1;min-width:0;font-size:12.5px;font-weight:650;color:var(--ink);
+  line-height:1.35}
+.faq .n{font-size:11px;font-family:var(--mono);color:var(--ink-3);flex:0 0 auto}
+
+.answer{margin-top:14px;border:1px solid #BFE3CD;background:#F2FAF5;border-radius:14px;
+  padding:15px 16px}
+.answer .k{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:#0B8A4B;margin-bottom:8px}
+.answer .txt{font-size:13.5px;line-height:1.7;color:var(--ink);white-space:pre-wrap;
+  margin-bottom:14px}
+.answer .row{display:flex;gap:9px;flex-wrap:wrap}
+.thinking{margin-top:14px;font-size:12.5px;color:var(--ink-3)}
+
+.mic{width:38px;height:38px;flex:0 0 38px;border-radius:11px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);
+  font-size:15px;cursor:pointer;display:grid;place-items:center;transition:.15s}
+.mic:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-bg)}
+.mic[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#fff;
+  animation:micpulse 1.4s ease-out infinite}
+@keyframes micpulse{70%{box-shadow:0 0 0 11px rgba(239,78,43,0)}
+  100%{box-shadow:0 0 0 0 rgba(239,78,43,0)}}
+.mic:disabled{opacity:.4;cursor:not-allowed}
+.microw{display:flex;gap:9px;align-items:flex-start}
+.microw textarea{flex:1}
+.ghost{margin-top:6px;font-size:13px;color:var(--ink-3);font-style:italic;
+  line-height:1.5}
+.lowconf{margin-top:7px;font-size:11.5px;font-weight:600;color:#C97A00;
+  background:#FDF2E0;border-radius:9px;padding:6px 10px;display:inline-block}
+
 .scrim{position:fixed;inset:0;background:rgba(22,24,28,.36);z-index:40;
   display:grid;place-items:center;padding:20px;animation:fade .16s ease-out}
 /* display:grid above beats the UA's [hidden]{display:none} -- same
    specificity, declared later -- so the closed modal stayed on top of the
    page as an invisible sheet and swallowed every click on the table. */
 .scrim[hidden]{display:none}
+/* Same trap, same fix, for the controls added for voice and the FAQ card. */
+.faqs[hidden],.microw[hidden],.ghost[hidden],.lowconf[hidden],
+.hctl[hidden]{display:none}
 @keyframes fade{from{opacity:0}}
 .modal{width:100%;max-width:520px;background:var(--surface);border-radius:20px;
   box-shadow:0 24px 60px -12px rgba(16,24,40,.3);overflow:hidden;
@@ -145,6 +205,12 @@ tbody tr:hover{background:var(--surface-2)}
     </div>
   </div>
   <div class="grow"></div>
+  <div class="hctl">
+    <select class="lang" id="langPick" aria-label="Language"></select>
+    <button class="vtoggle" id="voiceToggle" aria-pressed="true"
+            title="Turn voice controls off">
+      <span class="vdot"></span>Voice</button>
+  </div>
   <div class="me" id="me" hidden>
     <span class="av" id="meAv">?</span>
     <span>
@@ -158,6 +224,13 @@ tbody tr:hover{background:var(--surface-2)}
 <main>
   <div class="wrap">
     <div class="notice" id="notice" hidden></div>
+
+    <div class="faqs" id="faqs" hidden>
+      <h2 id="faqTitle">Common issues &mdash; find your answer instantly</h2>
+      <div class="sub" id="faqSub">Tap one and we will try to answer it straight away.</div>
+      <div class="faqgrid" id="faqGrid"></div>
+      <div id="faqOut"></div>
+    </div>
 
     <div class="vhead">
       <div>
@@ -192,7 +265,13 @@ tbody tr:hover{background:var(--surface-2)}
           </div>
           <div class="field">
             <label for="description">What happened</label>
-            <textarea id="description" placeholder="Describe the problem in your own words." required></textarea>
+            <div class="microw">
+              <textarea id="description" placeholder="Describe the problem in your own words." required></textarea>
+              <button type="button" class="mic" id="descMic" aria-pressed="false"
+                      data-voice title="Speak instead of typing">&#127908;</button>
+            </div>
+            <div class="ghost" id="descGhost" hidden></div>
+            <div class="lowconf" id="descLow" hidden>&#9888; Check this &mdash; we were not sure we heard it right</div>
           </div>
         </div>
         <div class="mfoot">
@@ -211,8 +290,12 @@ tbody tr:hover{background:var(--surface-2)}
   </div>
 </div>
 
+<script src="/static/voice.js"></script>
 <script>
 const $ = id => document.getElementById(id);
+let descSpoken = false;   // did the description arrive by voice?
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let CATEGORIES = [];
 
 function when(iso){
@@ -239,7 +322,7 @@ function render(tickets){
       <p>Raise your first one and we will pick it up straight away.</p>
       <button class="btn brand" id="emptyNew">New support request</button>
     </div></div>`;
-    $("emptyNew").onclick = openModal;
+    $("emptyNew").onclick = () => openModal();
     return;
   }
 
@@ -286,16 +369,29 @@ async function load(){
   }catch(e){ /* leave whatever is on screen */ }
 }
 
-function openModal(){
+/* `pre` pre-fills the form when the customer arrives from a common issue,
+   so they do not have to classify a problem they already named. */
+function openModal(pre){
   $("err").hidden = true;
   $("formView").hidden = false;
   $("doneView").hidden = true;
   $("scrim").hidden = false;
-  $("subject").focus();
+  if(pre && pre.category && CATEGORIES.includes(pre.category)){
+    $("category").value = pre.category;
+  }
+  if(pre && pre.subject && !$("subject").value) $("subject").value = pre.subject;
+  (pre && pre.subject ? $("description") : $("subject")).focus();
 }
-function closeModal(){ $("scrim").hidden = true; $("form").reset(); }
+function closeModal(){
+  $("scrim").hidden = true;
+  $("form").reset();
+  $("descGhost").hidden = true;
+  $("descLow").hidden = true;
+  descSpoken = false;
+  SC.stopDictation();
+}
 
-$("newBtn").onclick = openModal;
+$("newBtn").onclick = () => openModal();
 $("cancelBtn").onclick = closeModal;
 $("scrim").onclick = e => { if(e.target === $("scrim")) closeModal(); };
 document.addEventListener("keydown", e => {
@@ -316,6 +412,7 @@ $("form").addEventListener("submit", async e => {
         subject: $("subject").value.trim(),
         category: $("category").value,
         description: $("description").value.trim(),
+        channel: descSpoken ? "voice" : "typed",
       }),
     })).json();
   }catch(err){ d = {ok: false, error: "Could not reach the server."}; }
@@ -362,6 +459,126 @@ $("signOut").onclick = async () => {
   await fetch("/api/logout", {method: "POST"}).catch(() => {});
   location.href = "/login";
 };
+
+/* ---------------- common issues ----------------
+   Six groups, the same ones the Knowledge section counts, labelled in the
+   customer's language. Clicking searches the knowledge base first: a
+   confident answer means no ticket at all. */
+
+let FAQS = [];
+
+async function loadFaqs(){
+  try{
+    const d = await (await fetch("/api/portal/faqs")).json();
+    if(!d.ok || !d.faqs || !d.faqs.length) return;
+    FAQS = d.faqs;
+    if(d.heading)    $("faqTitle").textContent = d.heading;
+    if(d.subheading) $("faqSub").textContent = d.subheading;
+    $("faqGrid").innerHTML = FAQS.map(f => `
+      <button class="faq" data-faq="${esc(f.id)}">
+        <span class="em">${f.icon}</span>
+        <span class="lab">${esc(f.label)}</span>
+        ${f.count ? `<span class="n">${f.count}</span>` : ""}
+      </button>`).join("");
+    $("faqGrid").querySelectorAll("[data-faq]").forEach(b => {
+      b.onclick = () => askFaq(b.dataset.faq);
+    });
+    $("faqs").hidden = false;
+  }catch(e){ /* the ticket list is the page; this card is a bonus */ }
+}
+
+function faqById(id){ return FAQS.find(f => f.id === id) || {}; }
+
+async function askFaq(id){
+  const faq = faqById(id);
+  $("faqOut").innerHTML =
+    `<div class="thinking"><span class="spin"></span>Looking that up…</div>`;
+
+  let d;
+  try{
+    d = await (await fetch("/api/portal/faq/" + encodeURIComponent(id),
+                           {method: "POST"})).json();
+  }catch(e){ d = {ok: false}; }
+
+  $("faqOut").innerHTML = "";
+
+  if(!d || !d.ok || !d.answered){
+    // No confident article. Straight to a ticket, with the category filled in
+    // so the customer does not have to classify their own problem.
+    openModal({category: (d && d.category) || faq.category,
+               subject: faq.english || faq.label});
+    return;
+  }
+
+  showAnswer(id, d.answer);
+}
+
+function showAnswer(id, answer){
+  const faq = faqById(id);
+  $("faqOut").innerHTML = `
+    <div class="answer">
+      <div class="k">Answer</div>
+      <div class="txt" id="faqTxt"></div>
+      <div class="row">
+        <button class="btn brand" id="faqSolved">This solved it</button>
+        <button class="btn" id="faqHelp">I still need help</button>
+        <button class="btn" id="faqPlay" hidden>▶ Play</button>
+      </div>
+    </div>`;
+  $("faqTxt").textContent = answer;
+
+  $("faqSolved").onclick = async () => {
+    $("faqSolved").disabled = true;
+    try{
+      await fetch("/api/portal/faq/" + encodeURIComponent(id) + "/solved", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({answer}),
+      });
+    }catch(e){}
+    SC.stop();
+    $("faqOut").innerHTML =
+      `<div class="answer"><div class="k">Sorted</div>
+       <div class="txt">Glad that helped. Nothing else to do — no ticket was
+       raised.</div></div>`;
+    load();
+  };
+
+  $("faqHelp").onclick = () => {
+    SC.stop();
+    openModal({category: faq.category, subject: faq.english || faq.label});
+  };
+
+  const play = $("faqPlay");
+  if(SC.canSpeak){
+    play.hidden = !SC.voiceOn;
+    play.onclick = () => {
+      if(play.dataset.on === "1"){ SC.stop(); return; }
+      SC.speak(answer, SC.language,
+               () => { play.dataset.on = "1"; play.textContent = "■ Stop"; },
+               () => { play.dataset.on = "";  play.textContent = "▶ Play"; });
+    };
+  }
+}
+
+/* ---------------- language + voice ---------------- */
+
+SC.mountVoiceToggle($("voiceToggle"));
+const descMic = SC.attachMic($("descMic"), $("description"), {
+  ghost: $("descGhost"), hint: $("descLow"),
+  onVoice: () => { descSpoken = true; },   // never submits; only labels
+});
+SC.onVoiceChange(on => {
+  on ? descMic.enable() : descMic.disable();
+  const p = $("faqPlay");
+  if(p) p.hidden = !on;
+});
+
+SC.mountPicker($("langPick"), code => {
+  $("descMic").title = SC.canDictate
+    ? "Speak in " + SC.nativeName(code)
+    : $("descMic").title;
+  loadFaqs();          // the labels are language-specific
+});
 </script>
 </body>
 </html>
