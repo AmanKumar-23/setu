@@ -109,7 +109,14 @@ def test_analysis_is_stored_in_english_whatever_the_customer_wrote(
     assert stored["language"] == "ta"          # the reply language, recorded
 
 
-def test_switching_language_is_remembered_across_sessions(srv, client, auth_mod):
+def test_switching_language_is_remembered_across_sessions(srv, client, auth_mod,
+                                                          monkeypatch):
+    # Setting a language now also builds the UI catalogue for it, which is a
+    # model call for anything but English and Hindi. This test is about the
+    # profile, not the words.
+    monkeypatch.setattr(srv.coach_core.AICoach, "translate_lines",
+                        lambda self, lines, note: list(lines))
+    srv._UI_CACHE.clear()
     sign_in(client)
     assert client.post("/api/portal/language", json={"language": "bn"}).status_code == 200
     client.post("/api/logout")

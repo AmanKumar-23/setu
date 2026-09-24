@@ -1533,11 +1533,14 @@ def portal_case(case_id):
 @require_exact("customer")
 def portal_languages():
     """The picker's options, each in its own script."""
+    selected = languages.normalise(
+        getattr(current_user, "preferred_language", DEFAULT_LANGUAGE))
     return jsonify({"ok": True,
                     "default": DEFAULT_LANGUAGE,
-                    "selected": languages.normalise(
-                        getattr(current_user, "preferred_language",
-                                DEFAULT_LANGUAGE)),
+                    "selected": selected,
+                    # The page paints from this rather than from the markup,
+                    # so a reload comes back in the chosen language.
+                    "strings": ui_strings(selected),
                     "languages": [
                         {"code": code, "native": meta["native"],
                          "english": meta["english"], "speech": meta["speech"]}
@@ -1553,32 +1556,197 @@ def portal_set_language():
     if not languages.is_supported(wanted):
         return jsonify({"ok": False, "error": "Unknown language."}), 400
     auth.set_language(signed_in_username(), wanted)
+    # The page has already repainted from its own seed or cache by the time
+    # this answers; the catalogue here is what it keeps for the ones it could
+    # not know in advance.
     return jsonify({"ok": True, "language": wanted,
                     "native": languages.native_name(wanted),
-                    "speech": languages.speech_code(wanted)})
+                    "speech": languages.speech_code(wanted),
+                    "strings": ui_strings(wanted)})
 
 
-FAQ_HEADING = "Common issues \u2014 find your answer instantly"
-FAQ_SUBHEADING = "Tap one and we will try to answer it straight away."
+# ---------------------------------------------------------------------------
+# The customer-side string catalogue
+#
+# The source of truth for what a customer reads is app/static/i18n.js; this is
+# the same English, kept here because the translation happens server-side and
+# the model needs the source text. A test asserts the two never drift.
+#
+# Only the CHROME is in here. Ticket ids, order and refund ids, amounts, dates
+# and anything the customer wrote themselves are never translated, so they are
+# not keys and can never accidentally become ones.
+# ---------------------------------------------------------------------------
+UI_STRINGS = {
+    "header.subtitle": "Customer portal",
+    "language": "Language",
+    "signOut": "Sign out",
+    "voice.button": "Voice",
+    "voice.turnOff": "Turn voice controls off",
+    "voice.turnOn": "Turn voice controls on",
+    "voice.isOff": "Voice is off",
+    "voice.speakInstead": "Speak instead of typing",
+    "voice.speakIn": "Speak in {lang}",
+    "voice.unsupported": "Voice input needs Chrome, Edge or Safari. Type your message instead.",
+    "voice.blocked": "Microphone blocked. Allow it in your browser settings to dictate.",
+    "voice.nothingHeard": "We did not hear anything. Try again, or type it.",
+    "voice.lowConfidence": "⚠ Check this — we were not sure we heard it right.",
+    "faq.title": "Common issues — find your answer instantly",
+    "faq.sub": "Tap one and we will try to answer it straight away.",
+    "faq.looking": "Looking that up…",
+    "faq.answer": "Answer",
+    "faq.solved": "This solved it",
+    "faq.needHelp": "I still need help",
+    "faq.sorted": "Sorted",
+    "faq.gladThatHelped": "Glad that helped. Nothing else to do — no ticket was raised.",
+    "tickets.title": "Your tickets",
+    "tickets.tagline": "AI where it’s safe. Human where it matters.",  # noqa: RUF001
+    "tickets.welcome": "Welcome back, {name}",
+    "tickets.one": "1 ticket",
+    "tickets.many": "{n} tickets",
+    "tickets.new": "New support request",
+    "th.ticket": "Ticket",
+    "th.subject": "Subject",
+    "th.category": "Category",
+    "th.status": "Status",
+    "th.rating": "Rating",
+    "th.updated": "Last updated",
+    "action.open": "Open",
+    "action.rateThis": "Rate this",
+    "rating.youRated": "You rated this {n} of 5",
+    "empty.title": "No tickets yet",
+    "empty.body": "Raise your first one and we will pick it up straight away.",
+    "notice.notYours": "That ticket is not yours. Here are your own.",
+    "status.Handled by AI": "Handled by AI",
+    "status.A human agent is reviewing": "A human agent is reviewing",
+    "status.Resolved": "Resolved",
+    "cat.Recharge": "Recharge",
+    "cat.Refund": "Refund",
+    "cat.Order & Delivery": "Order & Delivery",
+    "cat.Network": "Network",
+    "cat.Account & Login": "Account & Login",
+    "cat.Other": "Other",
+    "time.justNow": "just now",
+    "time.minutes": "{n}m ago",
+    "time.hours": "{n}h ago",
+    "time.days": "{n}d ago",
+    "modal.title": "New support request",
+    "modal.sub": "Tell us what happened and we will look at it straight away.",
+    "modal.subject": "Subject",
+    "modal.subjectPlaceholder": "Recharge failed but money was deducted",
+    "modal.category": "Category",
+    "modal.what": "What happened",
+    "modal.whatPlaceholder": "Describe the problem in your own words.",
+    "modal.cancel": "Cancel",
+    "modal.submit": "Raise ticket",
+    "modal.raising": "Raising…",
+    "modal.created": "Ticket created",
+    "modal.lookingNow": "We’re looking at this now.",  # noqa: RUF001
+    "err.unreachable": "Could not reach the server.",
+    "err.couldNotRaise": "Could not raise that ticket.",
+    "chat.back": "← All tickets",
+    "chat.placeholder": "Type your message…",
+    "chat.send": "Send",
+    "chat.sending": "Sending",
+    "chat.thinking": "Looking at this…",
+    "chat.humanJoining": "A human agent is joining this conversation",
+    "chat.sentByVoice": "Sent by voice",
+    "play.play": "Play",
+    "play.stop": "Stop",
+    "player.playLatest": "Play latest reply",
+    "offer.question": "Reply in {lang} instead?",
+    "offer.yes": "Yes, switch",
+    "offer.no": "No, keep {lang}",
+    "rate.title": "Was your issue resolved?",
+    "rate.titleDone": "Thanks — you rated this",
+    "rate.sub": "Tell us how it went. One tap, and a line if you want to.",
+    "rate.subDone": "You can change this for 24 hours after rating.",
+    "rate.placeholder": "Anything you want to add? (optional)",
+    "rate.send": "Send rating",
+    "rate.update": "Update rating",
+    "rate.pickStar": "Pick a star first.",
+    "rate.sending": "Sending…",
+    "rate.couldNotSave": "Could not save that.",
+    "rate.thanks": "Thanks for rating this",
+    "rate.ariaStars": "Rate from 1 to 5",
+}
 
-# The card's fixed words per language, translated once and kept. Without this
-# it would buy the same eight phrases on every page load.
-_FAQ_WORDS = {}
+# Hindi is written by hand in i18n.js so the author can proofread it, and the
+# page applies that seed without asking the server at all. Anything else is
+# bought once per language and kept for the life of the process.
+SEEDED_LANGUAGES = ("en", "hi")
+
+_UI_CACHE = {}
+
+# Small enough that one dropped line only costs its own batch. translate_lines
+# falls back to English on a count mismatch, so without batching a single bad
+# response would leave the whole page untranslated.
+UI_BATCH = 20
 
 
-def faq_words(language):
-    """The FAQ card's heading, subheading and six labels in `language`.
+def ui_strings(language):
+    """The catalogue in `language`, English for anything that fails.
 
-    All eight go in ONE call and are cached for the life of the process, so a
-    language costs one translation however many customers open the page. The
-    card is decoration around a search: if the translation fails the customer
-    still sees eight working English phrases rather than an error.
+    Cached per language for the life of the process: the words do not change,
+    so a language is a fixed one-off cost however many customers sign in.
     """
-    english = [FAQ_HEADING, FAQ_SUBHEADING] + [faq["label"] for faq in FAQS]
+    language = languages.normalise(language)
+    if language in SEEDED_LANGUAGES:
+        return dict(UI_STRINGS)
+    if language in _UI_CACHE:
+        return _UI_CACHE[language]
+
+    note = languages.reply_instruction(language)
+    if not note:
+        return dict(UI_STRINGS)
+
+    # The model is translating UI labels, not a reply, so it needs two rules
+    # the reply instruction does not carry.
+    note += ("\nThese are interface labels. Keep any {placeholder} in braces "
+             "EXACTLY as written, in the same place, untranslated.\n"
+             "Keep the words AI, Chrome, Edge and Safari as they are.")
+
+    keys = list(UI_STRINGS)
+    out = dict(UI_STRINGS)
+    for start in range(0, len(keys), UI_BATCH):
+        chunk = keys[start:start + UI_BATCH]
+        english = [UI_STRINGS[k] for k in chunk]
+        try:
+            done = session.coach.translate_lines(english, note)
+        except Exception:
+            continue                # that batch stays English; the rest still lands
+        if len(done) != len(chunk):
+            continue
+        for key, text in zip(chunk, done, strict=True):
+            # A translation that dropped a placeholder would render "{n}" or
+            # nothing at all, so the English is safer than a broken line.
+            if placeholders(UI_STRINGS[key]) == placeholders(text):
+                out[key] = text
+
+    _UI_CACHE[language] = out
+    return out
+
+
+def placeholders(text):
+    return sorted(re.findall(r"\{(\w+)\}", text))
+
+
+# Six data-driven labels per language, translated once and kept. The card's
+# own heading and subheading live in the catalogue above with the rest of the
+# chrome; only the issue labels, which come from FAQS, are bought here.
+_FAQ_LABELS = {}
+
+
+def faq_labels(language):
+    """The six FAQ labels in `language`, English if we cannot get them.
+
+    The card is decoration around a search: if the translation fails the
+    customer still sees six working buttons, in English, rather than an error.
+    """
+    english = [faq["label"] for faq in FAQS]
     if language == DEFAULT_LANGUAGE:
         return english
-    if language in _FAQ_WORDS:
-        return _FAQ_WORDS[language]
+    if language in _FAQ_LABELS:
+        return _FAQ_LABELS[language]
 
     try:
         translated = session.coach.translate_lines(
@@ -1586,7 +1754,7 @@ def faq_words(language):
     except Exception:
         return english                 # not worth failing the page over
 
-    _FAQ_WORDS[language] = translated
+    _FAQ_LABELS[language] = translated
     return translated
 
 
@@ -1596,7 +1764,7 @@ def portal_faqs():
     """The same six Knowledge groups the dashboard counts, with real counts."""
     language = languages.normalise(
         getattr(current_user, "preferred_language", DEFAULT_LANGUAGE))
-    heading, subheading, *labels = faq_words(language)
+    labels = faq_labels(language)
     cases = load_cases()
     blobs = [" ".join([c.get("key_issue", "")]
                       + [m.get("text", "") for m in c.get("messages", [])]).lower()
@@ -1612,8 +1780,7 @@ def portal_faqs():
                          if any(w in b for w in faq["keywords"])),
         })
     rows.sort(key=lambda r: -r["count"])
-    return jsonify({"ok": True, "faqs": rows, "language": language,
-                    "heading": heading, "subheading": subheading})
+    return jsonify({"ok": True, "faqs": rows, "language": language})
 
 
 @app.post("/api/portal/faq/<faq_id>")

@@ -39,8 +39,19 @@
 
   /* Fills a <select> and wires it to POST /api/portal/language.
      `onChange` runs after the server has stored the choice. */
+  /* A catalogue we have already paid for, kept per browser so a second visit
+     in the same language repaints with no round trip at all. */
+  function cached(code) {
+    try { return JSON.parse(SC.get("sc.strings." + code, "null")); }
+    catch (e) { return null; }
+  }
+  function remember(code, table) {
+    try { SC.set("sc.strings." + code, JSON.stringify(table)); } catch (e) {}
+  }
+
   SC.mountPicker = function (select, onChange) {
     if (!select) return Promise.resolve();
+    SC.repaint = onChange;
     return fetch("/api/portal/languages")
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -52,25 +63,51 @@
         }).join("");
         SC.language = d.selected || "en";
         select.value = SC.language;
+        if (d.strings && SC.useStrings) {
+          remember(SC.language, d.strings);
+          SC.useStrings(d.strings);
+        }
         select.onchange = function () { SC.setLanguage(select.value, onChange); };
         if (onChange) onChange(SC.language);
       })
       .catch(function () {
-        // The picker stays empty; the page still works, and anything waiting
-        // on the language still gets told which one we are using.
+        // The picker stays empty; the page still works in English, and
+        // anything waiting on the language still gets told which one we use.
         if (onChange) onChange(SC.language);
       });
   };
 
+  /* Switching is a repaint, not a reload.
+   *
+   * The words change first, from the hand-written seed or from a catalogue
+   * this browser already holds, so there is no wait and no flash of the old
+   * language. Storing the choice on the profile and fetching anything we do
+   * not have happen afterwards, and repaint again only if they bring
+   * something new. Nothing in here navigates.
+   */
   SC.setLanguage = function (code, done) {
     SC.language = code;
     SC.stop();
+    done = done || SC.repaint;
+
+    var known = (SC.seedFor && SC.seedFor(code)) || cached(code);
+    if (SC.useStrings) SC.useStrings(known || {});   // {} falls back to English
+    if (done) done(code);
+
     fetch("/api/portal/language", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ language: code }),
-    }).catch(function () { /* the choice still holds for this page */ });
-    if (done) done(code);
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        // Ignore a slow answer for a language the customer has since left.
+        if (!d || !d.ok || !d.strings || SC.language !== code) return;
+        remember(code, d.strings);
+        if (SC.useStrings) SC.useStrings(d.strings);
+        if (done) done(code);
+      })
+      .catch(function () { /* the choice still holds for this page */ });
   };
 
   /* ---------- the global voice switch ------------------------------------ */
@@ -84,8 +121,9 @@
     if (!btn) return;
     var paint = function () {
       btn.setAttribute("aria-pressed", SC.voiceOn ? "true" : "false");
-      btn.title = SC.voiceOn ? "Turn voice controls off" : "Turn voice controls on";
+      btn.title = SC.t(SC.voiceOn ? "voice.turnOff" : "voice.turnOn");
     };
+    SC.onStrings(paint);
     btn.onclick = function () {
       SC.voiceOn = !SC.voiceOn;
       SC.set("sc.voice", SC.voiceOn ? "1" : "0");
@@ -120,7 +158,7 @@
     };
 
     if (!SC.canDictate) {
-      deny("Voice input needs Chrome, Edge or Safari. Type your message instead.");
+      deny(SC.t("voice.unsupported"));
       return { disable: function () {}, enable: function () {} };
     }
 
@@ -174,17 +212,16 @@
       rec.onerror = function (ev) {
         finish();
         if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
-          deny("Microphone blocked. Allow it in your browser settings to dictate.");
+          deny(SC.t("voice.blocked"));
         } else if (ev.error === "no-speech" && opts.hint) {
-          opts.hint.textContent = "We did not hear anything. Try again, or type it.";
+          opts.hint.textContent = SC.t("voice.nothingHeard");
           opts.hint.hidden = false;
         }
       };
 
       rec.onend = function () {
         if (shaky && opts.hint) {
-          opts.hint.textContent =
-            "⚠ Check this — we were not sure we heard it right.";
+          opts.hint.textContent = SC.t("voice.lowConfidence");
           opts.hint.hidden = false;
         }
         finish();
@@ -204,9 +241,10 @@
 
     return {
       disable: function () { off = true; btn.disabled = true; SC.stopDictation();
-                             btn.title = "Voice is off"; },
+                             btn.title = SC.t("voice.isOff"); },
       enable: function () { off = false; btn.disabled = false;
-                            btn.title = "Speak instead of typing"; },
+                            btn.title = SC.t("voice.speakIn",
+                                             { lang: SC.nativeName() }); },
     };
   };
 

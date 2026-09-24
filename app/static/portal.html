@@ -228,15 +228,16 @@ tbody tr:hover{background:var(--surface-2)}
     <div class="logo"><span class="dev">से</span></div>
     <div>
       <div class="bname"><span class="dev">सेतु</span> · Setu</div>
-      <div class="btag">Customer portal</div>
+      <div class="btag" data-i18n="header.subtitle">Customer portal</div>
     </div>
   </div>
   <div class="grow"></div>
   <div class="hctl">
-    <select class="lang" id="langPick" aria-label="Language"></select>
+    <select class="lang" id="langPick" aria-label="Language"
+            data-i18n-aria="language"></select>
     <button class="vtoggle" id="voiceToggle" aria-pressed="true"
-            title="Turn voice controls off">
-      <span class="vdot"></span>Voice</button>
+            data-i18n-title="voice.turnOff">
+      <span class="vdot"></span><span data-i18n="voice.button">Voice</span></button>
   </div>
   <div class="me" id="me" hidden>
     <span class="av" id="meAv">?</span>
@@ -244,7 +245,8 @@ tbody tr:hover{background:var(--surface-2)}
       <span class="mn" id="meName">&mdash;</span>
       <span class="mr" id="meRole">&mdash;</span>
     </span>
-    <button class="out" id="signOut" title="Sign out" aria-label="Sign out">&#9211;</button>
+    <button class="out" id="signOut" data-i18n-title="signOut"
+            data-i18n-aria="signOut">&#9211;</button>
   </div>
 </div>
 
@@ -253,20 +255,20 @@ tbody tr:hover{background:var(--surface-2)}
     <div class="notice" id="notice" hidden></div>
 
     <div class="faqs" id="faqs" hidden>
-      <h2 id="faqTitle">Common issues &mdash; find your answer instantly</h2>
-      <div class="sub" id="faqSub">Tap one and we will try to answer it straight away.</div>
+      <h2 id="faqTitle" data-i18n="faq.title">Common issues &mdash; find your answer instantly</h2>
+      <div class="sub" id="faqSub" data-i18n="faq.sub">Tap one and we will try to answer it straight away.</div>
       <div class="faqgrid" id="faqGrid"></div>
       <div id="faqOut"></div>
     </div>
 
     <div class="vhead">
       <div>
-        <div class="vtitle">Your tickets</div>
+        <div class="vtitle" data-i18n="tickets.title">Your tickets</div>
         <div class="vsub" id="vsub">&nbsp;</div>
-        <div class="vtag">AI where it&rsquo;s safe. Human where it matters.</div>
+        <div class="vtag" data-i18n="tickets.tagline">AI where it&rsquo;s safe. Human where it matters.</div>
       </div>
       <div class="grow"></div>
-      <button class="btn brand" id="newBtn">New support request</button>
+      <button class="btn brand" id="newBtn" data-i18n="tickets.new">New support request</button>
     </div>
 
     <div id="listWrap"></div>
@@ -277,47 +279,50 @@ tbody tr:hover{background:var(--surface-2)}
   <div class="modal" id="modal">
     <div id="formView">
       <div class="mhead">
-        <h2>New support request</h2>
-        <p>Tell us what happened and we will look at it straight away.</p>
+        <h2 data-i18n="modal.title">New support request</h2>
+        <p data-i18n="modal.sub">Tell us what happened and we will look at it straight away.</p>
       </div>
       <form id="form">
         <div class="mbody">
           <div class="err" id="err" hidden></div>
           <div class="field">
-            <label for="subject">Subject</label>
-            <input id="subject" maxlength="120" placeholder="Recharge failed but money was deducted" required>
+            <label for="subject" data-i18n="modal.subject">Subject</label>
+            <input id="subject" maxlength="120" data-i18n-ph="modal.subjectPlaceholder"
+                   placeholder="Recharge failed but money was deducted" required>
           </div>
           <div class="field">
-            <label for="category">Category</label>
+            <label for="category" data-i18n="modal.category">Category</label>
             <select id="category"></select>
           </div>
           <div class="field">
-            <label for="description">What happened</label>
+            <label for="description" data-i18n="modal.what">What happened</label>
             <div class="microw">
-              <textarea id="description" placeholder="Describe the problem in your own words." required></textarea>
+              <textarea id="description" data-i18n-ph="modal.whatPlaceholder"
+                        placeholder="Describe the problem in your own words." required></textarea>
               <button type="button" class="mic" id="descMic" aria-pressed="false"
-                      data-voice title="Speak instead of typing">&#127908;</button>
+                      data-voice data-i18n-title="voice.speakInstead">&#127908;</button>
             </div>
-            <div class="ghost" id="descGhost" hidden></div>
-            <div class="lowconf" id="descLow" hidden>&#9888; Check this &mdash; we were not sure we heard it right</div>
+            <div class="ghost" id="descGhost" data-i18n-exempt hidden></div>
+            <div class="lowconf" id="descLow" hidden></div>
           </div>
         </div>
         <div class="mfoot">
-          <button type="button" class="btn" id="cancelBtn">Cancel</button>
-          <button type="submit" class="btn brand" id="submitBtn">Raise ticket</button>
+          <button type="button" class="btn" id="cancelBtn" data-i18n="modal.cancel">Cancel</button>
+          <button type="submit" class="btn brand" id="submitBtn" data-i18n="modal.submit">Raise ticket</button>
         </div>
       </form>
     </div>
 
     <div class="done" id="doneView" hidden>
       <div class="tick">&#10003;</div>
-      <h2>Ticket created</h2>
-      <div class="cid" id="doneId">&mdash;</div>
-      <p>We&rsquo;re looking at this now.</p>
+      <h2 data-i18n="modal.created">Ticket created</h2>
+      <div class="cid" id="doneId" data-i18n-exempt>&mdash;</div>
+      <p data-i18n="modal.lookingNow">We&rsquo;re looking at this now.</p>
     </div>
   </div>
 </div>
 
+<script src="/static/i18n.js"></script>
 <script src="/static/voice.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -325,30 +330,51 @@ let descSpoken = false;   // did the description arrive by voice?
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let CATEGORIES = [];
+let ME = "";
 
+const T = (key, vars) => SC.t(key, vars);
+
+/* Values the server sends in English -- the three customer states and the
+   category list -- are looked up by that English text, which is also the
+   value the server stores. An unknown one falls through unchanged rather
+   than vanishing. */
+const statusText = label => SC.strings["status." + label] || label;
+const catText    = name  => SC.strings["cat." + name] || name;
+
+/* The WORDS are translated; the NUMBER never is. A count in Devanagari
+   digits is harder to read at a glance, and it is the same figure the agent
+   console and the dashboard are quoting. */
 function when(iso){
   if(!iso) return "—";
   const then = new Date(iso), mins = Math.round((Date.now() - then) / 60000);
-  if(mins < 1)  return "just now";
-  if(mins < 60) return mins + "m ago";
+  if(mins < 1)  return T("time.justNow");
+  if(mins < 60) return T("time.minutes", {n: mins});
   const h = Math.floor(mins / 60);
-  if(h < 24) return h + "h ago";
-  return Math.floor(h / 24) + "d ago";
+  if(h < 24) return T("time.hours", {n: h});
+  return T("time.days", {n: Math.floor(h / 24)});
 }
 
 /* The server decides the three states; this only paints them. Nothing about
    risk, sentiment or scores ever reaches this page. */
+let TICKETS = [];
+let LOADED = false;      // has the list arrived yet?
+
 function render(tickets){
+  // Kept so a language change can repaint the same rows without refetching.
+  if(tickets){ TICKETS = tickets; LOADED = true; }
+  else if(!LOADED) return;      // nothing to repaint yet; do not flash "no tickets"
+  tickets = TICKETS;
+
   $("vsub").textContent = tickets.length
-    ? `${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`
-    : " ";
+    ? (tickets.length === 1 ? T("tickets.one") : T("tickets.many", {n: tickets.length}))
+    : "\u00a0";
 
   if(!tickets.length){
     $("listWrap").innerHTML = `<div class="panel"><div class="empty">
       <div class="ico">&#127915;</div>
-      <h2>No tickets yet</h2>
-      <p>Raise your first one and we will pick it up straight away.</p>
-      <button class="btn brand" id="emptyNew">New support request</button>
+      <h2>${esc(T("empty.title"))}</h2>
+      <p>${esc(T("empty.body"))}</p>
+      <button class="btn brand" id="emptyNew">${esc(T("tickets.new"))}</button>
     </div></div>`;
     $("emptyNew").onclick = () => openModal();
     return;
@@ -356,30 +382,33 @@ function render(tickets){
 
   $("listWrap").innerHTML = `<div class="panel"><table>
     <thead><tr>
-      <th>Ticket</th><th>Subject</th><th>Category</th>
-      <th>Status</th><th>Rating</th><th>Last updated</th><th></th>
+      <th>${esc(T("th.ticket"))}</th><th>${esc(T("th.subject"))}</th>
+      <th>${esc(T("th.category"))}</th><th>${esc(T("th.status"))}</th>
+      <th>${esc(T("th.rating"))}</th><th>${esc(T("th.updated"))}</th><th></th>
     </tr></thead>
     <tbody>${tickets.map((t,i) => `
       <tr>
-        <td><span class="cid">${t.id}</span></td>
-        <td class="subj" data-s="${i}"></td>
+        <td><span class="cid" data-i18n-exempt>${t.id}</span></td>
+        <td class="subj" data-s="${i}" data-i18n-exempt></td>
         <td class="cat" data-c="${i}"></td>
         <td><span class="pill ${t.status_tone}"><i></i><span data-l="${i}"></span></span></td>
         <td>${t.rating
-              ? `<span class="stars" title="You rated this ${t.rating} of 5">${
+              ? `<span class="stars" title="${esc(T("rating.youRated", {n: t.rating}))}">${
                   "\u2605".repeat(t.rating)}${"\u2606".repeat(5 - t.rating)}</span>`
               : t.can_rate
-                ? '<span class="rateme">Rate this</span>'
+                ? `<span class="rateme">${esc(T("action.rateThis"))}</span>`
                 : '<span class="when">\u2014</span>'}</td>
         <td class="when">${when(t.updated_at)}</td>
-        <td style="text-align:right"><button class="btn" data-open="${t.id}">Open</button></td>
+        <td style="text-align:right"><button class="btn" data-open="${t.id}">${
+          esc(T("action.open"))}</button></td>
       </tr>`).join("")}</tbody></table></div>`;
 
-  // Text set separately: a subject is the customer's own words.
+  // Text set separately: a subject is the customer's own words and is never
+  // translated in any language. The category and the state are ours, so they are.
   tickets.forEach((t,i) => {
     document.querySelector(`[data-s="${i}"]`).textContent = t.subject;
-    document.querySelector(`[data-c="${i}"]`).textContent = t.category;
-    document.querySelector(`[data-l="${i}"]`).textContent = t.status_label;
+    document.querySelector(`[data-c="${i}"]`).textContent = catText(t.category);
+    document.querySelector(`[data-l="${i}"]`).textContent = statusText(t.status_label);
   });
   document.querySelectorAll("[data-open]").forEach(b => {
     b.onclick = () => { location.href = "/portal/chat/" + b.dataset.open; };
@@ -391,10 +420,22 @@ async function load(){
     const d = await (await fetch("/api/portal/tickets")).json();
     if(!d.ok) return;
     CATEGORIES = d.categories || [];
-    $("category").innerHTML = CATEGORIES.map(c =>
-      `<option value="${c}">${c}</option>`).join("");
+    paintCategories();
     render(d.tickets || []);
-  }catch(e){ /* leave whatever is on screen */ }
+  }catch(e){
+    // Leave whatever is on screen -- but say so. This catch once swallowed a
+    // ReferenceError and the page simply showed no tickets at all.
+    console.error("[portal] could not paint the ticket list:", e);
+  }
+}
+
+/* The VALUE stays the English category the server stores; only the label the
+   customer reads is translated. */
+function paintCategories(){
+  const keep = $("category").value;
+  $("category").innerHTML = CATEGORIES.map(c =>
+    `<option value="${esc(c)}">${esc(catText(c))}</option>`).join("");
+  if(keep) $("category").value = keep;
 }
 
 /* `pre` pre-fills the form when the customer arrives from a common issue,
@@ -430,7 +471,7 @@ $("form").addEventListener("submit", async e => {
   e.preventDefault();
   $("err").hidden = true;
   $("submitBtn").disabled = true;
-  $("submitBtn").innerHTML = '<span class="spin"></span>Raising…';
+  $("submitBtn").innerHTML = '<span class="spin"></span>' + esc(T("modal.raising"));
 
   let d;
   try{
@@ -443,13 +484,13 @@ $("form").addEventListener("submit", async e => {
         channel: descSpoken ? "voice" : "typed",
       }),
     })).json();
-  }catch(err){ d = {ok: false, error: "Could not reach the server."}; }
+  }catch(err){ d = {ok: false, error: T("err.unreachable")}; }
 
   $("submitBtn").disabled = false;
-  $("submitBtn").textContent = "Raise ticket";
+  $("submitBtn").textContent = T("modal.submit");
 
   if(!d.ok){
-    $("err").textContent = d.error || "Could not raise that ticket.";
+    $("err").textContent = d.error || T("err.couldNotRaise");
     $("err").hidden = false;
     return;
   }
@@ -464,7 +505,7 @@ $("form").addEventListener("submit", async e => {
 (async () => {
   const params = new URLSearchParams(location.search);
   if(params.get("error") === "not-your-ticket"){
-    $("notice").textContent = "That ticket is not yours. Here are your own.";
+    $("notice").textContent = T("notice.notYours");
     $("notice").hidden = false;
   }
 
@@ -476,7 +517,8 @@ $("form").addEventListener("submit", async e => {
       $("meRole").textContent = u.role;
       $("meAv").textContent = (u.display_name || u.username).trim()[0].toUpperCase();
       $("me").hidden = false;
-      $("vsub").textContent = "Welcome back, " + (u.display_name || u.username);
+      ME = u.display_name || u.username;
+      $("vsub").textContent = T("tickets.welcome", {name: ME});
     }
   }catch(e){}
 
@@ -500,8 +542,6 @@ async function loadFaqs(){
     const d = await (await fetch("/api/portal/faqs")).json();
     if(!d.ok || !d.faqs || !d.faqs.length) return;
     FAQS = d.faqs;
-    if(d.heading)    $("faqTitle").textContent = d.heading;
-    if(d.subheading) $("faqSub").textContent = d.subheading;
     $("faqGrid").innerHTML = FAQS.map(f => `
       <button class="faq" data-faq="${esc(f.id)}">
         <span class="em">${f.icon}</span>
@@ -520,7 +560,7 @@ function faqById(id){ return FAQS.find(f => f.id === id) || {}; }
 async function askFaq(id){
   const faq = faqById(id);
   $("faqOut").innerHTML =
-    `<div class="thinking"><span class="spin"></span>Looking that up…</div>`;
+    `<div class="thinking"><span class="spin"></span>${esc(T("faq.looking"))}</div>`;
 
   let d;
   try{
@@ -545,12 +585,12 @@ function showAnswer(id, answer){
   const faq = faqById(id);
   $("faqOut").innerHTML = `
     <div class="answer">
-      <div class="k">Answer</div>
-      <div class="txt" id="faqTxt"></div>
+      <div class="k">${esc(T("faq.answer"))}</div>
+      <div class="txt" id="faqTxt" data-i18n-exempt></div>
       <div class="row">
-        <button class="btn brand" id="faqSolved">This solved it</button>
-        <button class="btn" id="faqHelp">I still need help</button>
-        <button class="btn" id="faqPlay" hidden>▶ Play</button>
+        <button class="btn brand" id="faqSolved">${esc(T("faq.solved"))}</button>
+        <button class="btn" id="faqHelp">${esc(T("faq.needHelp"))}</button>
+        <button class="btn" id="faqPlay" hidden>▶ ${esc(T("play.play"))}</button>
       </div>
     </div>`;
   $("faqTxt").textContent = answer;
@@ -565,9 +605,8 @@ function showAnswer(id, answer){
     }catch(e){}
     SC.stop();
     $("faqOut").innerHTML =
-      `<div class="answer"><div class="k">Sorted</div>
-       <div class="txt">Glad that helped. Nothing else to do — no ticket was
-       raised.</div></div>`;
+      `<div class="answer"><div class="k">${esc(T("faq.sorted"))}</div>
+       <div class="txt">${esc(T("faq.gladThatHelped"))}</div></div>`;
     load();
   };
 
@@ -582,8 +621,8 @@ function showAnswer(id, answer){
     play.onclick = () => {
       if(play.dataset.on === "1"){ SC.stop(); return; }
       SC.speak(answer, SC.language,
-               () => { play.dataset.on = "1"; play.textContent = "■ Stop"; },
-               () => { play.dataset.on = "";  play.textContent = "▶ Play"; });
+               () => { play.dataset.on = "1"; play.textContent = "■ " + T("play.stop"); },
+               () => { play.dataset.on = "";  play.textContent = "▶ " + T("play.play"); });
     };
   }
 }
@@ -601,11 +640,18 @@ SC.onVoiceChange(on => {
   if(p) p.hidden = !on;
 });
 
-SC.mountPicker($("langPick"), code => {
-  $("descMic").title = SC.canDictate
-    ? "Speak in " + SC.nativeName(code)
-    : $("descMic").title;
-  loadFaqs();          // the labels are language-specific
+/* Every switch runs this, twice: once immediately from the seed or the
+   browser's own cache, and again if the server sends back a fuller
+   catalogue. It repaints, it never reloads. */
+SC.mountPicker($("langPick"), () => {
+  SC.paintStatic();                       // everything with a data-i18n key
+  if(ME) $("vsub").textContent = T("tickets.welcome", {name: ME});
+  paintCategories();
+  render();                               // the table, from the rows we hold
+  if($("descMic") && !$("descMic").disabled){
+    $("descMic").title = T("voice.speakInstead");
+  }
+  loadFaqs();                             // the six labels are server-side data
 });
 </script>
 </body>
