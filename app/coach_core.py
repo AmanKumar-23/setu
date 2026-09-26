@@ -8,6 +8,7 @@ Source cells: 1 (key helper), 17 (knowledge base), 26 (data models), 28 (AICoach
 """
 
 import json
+import logging
 import os
 import re
 import time
@@ -555,6 +556,15 @@ def knowledge_gap_detector(customer_message):
 
 
 # ---- Response schemas ----
+
+# Every model failure the app can see leaves here as ONE exception type. The
+# message carries the technical detail for the server log; nothing about it is
+# fit to show a customer, and the web layer never does.
+class ModelUnavailable(ValueError):
+    """Gemini could not be reached, or would not answer in time."""
+
+log = logging.getLogger("setu.model")
+
 #
 # These are handed to the API with each request. The model is then physically
 # unable to return prose, a markdown code fence, a missing field, or a word
@@ -1118,7 +1128,13 @@ class AICoach:
                 "run Step 2 again."
             )
 
-        self.client = genai.Client(api_key=api_key)
+        # A timeout on every request. Without one, a connection the server
+        # has half-closed can hang a request -- and the customer waiting on
+        # it -- for as long as the operating system feels like.
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=self.REQUEST_TIMEOUT_MS),
+        )
         self.last_redactions = []      # what the most recent call took out
         self.last_article = None       # the help article behind the last reply
 
@@ -1149,8 +1165,28 @@ class AICoach:
     # models get overloaded at peak times, and a demo should survive that.
     FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
 
-    # Errors worth waiting out: 503 = model busy, 429 = rate limited.
-    RETRYABLE = ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]
+    # Errors worth waiting out. The first four are the API saying "busy" or
+    # "slow down". The rest are the CONNECTION failing rather than the API
+    # answering -- a server that drops the socket mid-request raises
+    # RemoteProtocolError, which is not an HTTP status at all. This list used
+    # to stop at the first four, so a dropped connection was never retried:
+    # each model was tried once and abandoned, and the customer saw the raw
+    # exception. 500/INTERNAL is here too because Gemini's are overwhelmingly
+    # transient.
+    RETRYABLE = ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED",
+                 "500", "INTERNAL",
+                 "RemoteProtocolError", "Server disconnected",
+                 "ConnectError", "ReadError", "WriteError",
+                 "ReadTimeout", "ConnectTimeout", "TimeoutException",
+                 "timed out", "Connection reset", "ConnectionError"]
+
+    # One request may take this long before it is abandoned and retried.
+    REQUEST_TIMEOUT_MS = 20_000
+
+    # The whole call -- every retry on every model -- gives up after this.
+    # Without a ceiling, three attempts on two models with backoff can run
+    # well past a minute, and whoever is waiting just watches a spinner.
+    CALL_DEADLINE_S = 45
     # A malformed request is our fault, not the model's -- every other model
     # rejects it in exactly the same way, so falling back only doubles the
     # latency and the quota spent before we give up.
@@ -1175,9 +1211,16 @@ class AICoach:
                 models_to_try.append(name)
 
         last_problem = "no attempt was made"
+        started = time.monotonic()
+
+        def out_of_time(extra=0.0):
+            return time.monotonic() - started + extra > self.CALL_DEADLINE_S
 
         for model_name in models_to_try:
             for attempt in range(max_attempts):
+                if out_of_time():
+                    break
+                began = time.monotonic()
                 try:
                     response = self.client.models.generate_content(
                         model=model_name,
@@ -1186,23 +1229,43 @@ class AICoach:
                     )
                     self.last_model_used = model_name
                     report_usage(operation, model_name, response)
+                    took = time.monotonic() - began
+                    if took > 8:
+                        log.info("model %s answered %s in %.1fs",
+                                 model_name, operation, took)
                     return response
 
                 except Exception as error:
-                    last_problem = f"{type(error).__name__}: {error}"
+                    # The type matters as much as the text: a dropped socket
+                    # is "RemoteProtocolError" in the type name, not the text.
+                    detail = f"{type(error).__name__}: {error}"
+                    last_problem = detail
+                    log.warning("model %s %s attempt %d failed after %.1fs: %s",
+                                model_name, operation, attempt + 1,
+                                time.monotonic() - began, detail)
 
-                    if any(code in str(error) for code in self.RETRYABLE):
-                        time.sleep(2 ** attempt)      # 1s, then 2s, then 4s
-                        continue
-
-                    if any(code in str(error) for code in self.FATAL):
-                        raise ValueError(
-                            f"Gemini rejected the request -> {last_problem}"
+                    if any(code in detail for code in self.FATAL):
+                        raise ModelUnavailable(
+                            f"Gemini rejected the request -> {detail}"
                         ) from error
+
+                    if any(code in detail for code in self.RETRYABLE):
+                        # 1s, 2s, 4s -- but never sleep past the deadline.
+                        pause = 2 ** attempt
+                        if out_of_time(pause):
+                            break
+                        time.sleep(pause)
+                        continue
 
                     break        # will not fix itself; try the next model
 
-        raise ValueError(
+            if out_of_time():
+                break
+
+        log.error("model call %s gave up after %.1fs across %s: %s",
+                  operation, time.monotonic() - started,
+                  ", ".join(models_to_try), last_problem)
+        raise ModelUnavailable(
             "Gemini could not be reached after trying "
             f"{', '.join(models_to_try)}. Last problem -> {last_problem}"
         )

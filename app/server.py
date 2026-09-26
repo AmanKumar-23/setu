@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import socket
 import sqlite3
 import subprocess
@@ -562,6 +563,8 @@ def outgoing_sources(case):
             continue                      # only outgoing messages have an author
 
         recorded = message.get("source")
+        if recorded == SYSTEM_SOURCE:
+            continue                      # a notice, not anybody's reply
         if recorded in ("ai", "hybrid", "human"):
             sources.append(recorded)
             continue
@@ -599,6 +602,11 @@ def resolution_mode_for(case):
 
 
 CHANNELS = ("typed", "voice")
+
+# A notice written by Setu itself -- "your message is safe, a person will
+# reply" -- rather than by the model or by an agent. It must not count as
+# anybody handling the case, and it does not stop the first-response clock.
+SYSTEM_SOURCE = "system"
 
 
 def read_channel(body):
@@ -707,6 +715,10 @@ class LiveSession:
         # Where the ticket came from: "form", or "tag:<id>" for a Common
         # issues shortcut -- so the analytics can say which tags earn a place.
         self.origin = ""
+        # Who is working the case while it is open: "ai" or "human". Older
+        # cases have no value, which reads as "human" -- they were all worked
+        # by people, and nothing already in the queue may vanish from it.
+        self.handler = ""
         # The language the REPLY is written in. Analysis stays English.
         self.language = DEFAULT_LANGUAGE
         self.opened_at = None
@@ -761,6 +773,7 @@ class LiveSession:
             "subject": self.subject,
             "category": self.category,
             "origin": self.origin,
+            "handler": self.handler,
             "language": self.language,
             "opened_at": self.opened_at,
             "first_response_at": self.first_response_at,
@@ -879,6 +892,7 @@ class LiveSession:
         self.subject = case.get("subject") or ""
         self.category = case.get("category") or ""
         self.origin = case.get("origin") or ""
+        self.handler = case.get("handler") or ""
         self.language = case.get("language") or DEFAULT_LANGUAGE
         self.opened_at = case.get("opened_at")
         self.first_response_at = case.get("first_response_at")
@@ -1217,8 +1231,30 @@ def open_billing_account():
     metering.begin(signed_in_username())
 
 
+# What a person is told when a request fails. The exception itself -- model
+# names, "RemoteProtocolError", stack-trace-looking text -- is for the server
+# log and nobody else.
+SOFT_ERRORS = {
+    "model": ("Our assistant could not answer just now. Please try again in "
+              "a moment."),
+    "other": "Something went wrong on our side. Please try again.",
+}
+
+log = logging.getLogger("setu")
+
+
 def failure(error, status=502):
-    return jsonify({"ok": False, "error": str(error)}), status
+    """A failed request: logged in full, answered softly.
+
+    The reference is in both places, so a customer or an agent who reports
+    "it said ref 3fa9c1" leads the dev team straight to the log line.
+    """
+    ref = secrets.token_hex(3)
+    log.error("request failed [ref %s] %s %s: %s: %s", ref,
+              request.method, request.path, type(error).__name__, error,
+              exc_info=(type(error), error, error.__traceback__))
+    kind = "model" if isinstance(error, coach_core.ModelUnavailable) else "other"
+    return jsonify({"ok": False, "error": SOFT_ERRORS[kind], "ref": ref}), status
 
 
 def over_budget():
@@ -1510,8 +1546,13 @@ def as_customer_case(case, *, with_messages=False):
                 "from": ("You" if m.get("speaker") == "customer"
                          else m.get("author")
                          or ("AI assistant" if m.get("source") == "ai"
+                             else "Setu" if m.get("source") == SYSTEM_SOURCE
                              else "Support agent")),
                 "is_ai": m.get("speaker") != "customer" and m.get("source") == "ai",
+                # Anything Setu itself said can be read aloud: the AI's replies
+                # and its own notices. An agent's reply is a person's words.
+                "playable": (m.get("speaker") != "customer"
+                             and m.get("source") in ("ai", SYSTEM_SOURCE)),
                 # so the thread can show a mic on a dictated message
                 "by_voice": m.get("channel") == "voice",
                 "language": m.get("language") or case.get("language") or DEFAULT_LANGUAGE,
@@ -1602,6 +1643,22 @@ def portal_tickets():
                     "tickets": [as_customer_case(c) for c in cases_for_customer(me)]})
 
 
+def hand_to_a_person(sess, language, why):
+    """The model could not answer. Keep the ticket and tell the customer so.
+
+    The message they wrote is already saved -- run_customer_turn persists the
+    case before the first model call -- so what is left is to stop them staring
+    at an error: a calm note in their own language, and the case routed to a
+    person instead of waiting on an assistant that is not coming.
+    """
+    note = ui_strings_cached(language).get(
+        "note.assistantBusy", UI_STRINGS["note.assistantBusy"])
+    sess.state.add_message("agent", note, source=SYSTEM_SOURCE)
+    sess.handler = "human"
+    sess.persist(reopen=True)
+    log.warning("case %s handed to a person: %s", sess.case_id, why)
+
+
 @app.post("/api/portal/tickets")
 @require_exact("customer")
 def portal_new_ticket():
@@ -1633,14 +1690,20 @@ def portal_new_ticket():
     sess.origin = (f"tag:{tag}" if any(f["id"] == tag for f in FAQS)
                    else "form")
 
+    notice = None
     try:
         pipeline.run_customer_turn(
             sess, description, channel=read_channel(body), language=language)
     except Exception as error:
-        return failure(error)
+        # The ticket exists either way. What the customer must never see is
+        # the exception.
+        if sess.case_id is None:
+            return failure(error)
+        hand_to_a_person(sess, language, f"{type(error).__name__}: {error}")
+        notice = "assistant_unavailable"
 
     case = next((c for c in load_cases() if c.get("id") == sess.case_id), None)
-    return jsonify({"ok": True,
+    return jsonify({"ok": True, "notice": notice,
                     "ticket": as_customer_case(case or {}, with_messages=True)})
 
 
@@ -1792,6 +1855,7 @@ UI_STRINGS = {
     "faq.couldNotOpen": "Could not open a ticket. Try again, or use New support request.",
     "cat.Billing & Payments": "Billing & Payments",
     "cat.App & Technical": "App & Technical",
+    "note.assistantBusy": "Thanks — we have your message. Our assistant is taking longer than usual, so a member of our team will reply here shortly.",
 }
 
 # Hindi is written by hand in i18n.js so the author can proofread it, and the
@@ -1848,6 +1912,41 @@ def ui_strings(language):
 
     _UI_CACHE[language] = out
     return out
+
+
+def ui_strings_cached(language):
+    """The catalogue in `language` WITHOUT ever calling the model.
+
+    For the moments the model is the thing that failed: the hand-written
+    seed, or a translation already bought, or English. Never a fresh call.
+    """
+    language = languages.normalise(language)
+    if language in SEEDED_LANGUAGES:
+        return dict(UI_STRINGS) if language == "en" else _seeded_hindi()
+    return _UI_CACHE.get(language) or dict(UI_STRINGS)
+
+
+def _seeded_hindi():
+    """The Hindi the page itself ships with, read from i18n.js so there is
+    still exactly one copy of it."""
+    global _HINDI_SEED
+    if _HINDI_SEED is None:
+        _HINDI_SEED = dict(UI_STRINGS)
+        try:
+            with open(os.path.join(app.static_folder, "i18n.js"),
+                      encoding="utf-8") as handle:
+                source = handle.read()
+            block = source[source.index("var HI = {"):]
+            block = block[:block.index("\n  };")]
+            for key, text in re.findall(
+                    r'\n\s*"([^"]+)":\s*\n?\s*"((?:[^"\\]|\\.)*)"', block):
+                _HINDI_SEED[key] = json.loads(f'"{text}"')
+        except (OSError, ValueError):
+            pass                        # English is a safe answer
+    return _HINDI_SEED
+
+
+_HINDI_SEED = None
 
 
 def placeholders(text):
@@ -2045,18 +2144,20 @@ def portal_message(case_id):
 
     sess = scoped_session_for(case)
     language = getattr(current_user, "preferred_language", None) or sess.language
+    notice = None
     try:
         pipeline.run_customer_turn(
             sess, text, channel=read_channel(request.json or {}),
             language=language)
     except Exception as error:
-        return failure(error)
+        hand_to_a_person(sess, language, f"{type(error).__name__}: {error}")
+        notice = "assistant_unavailable"
 
     fresh = customer_case_or_none(case_id, signed_in_username())
     # What they actually wrote in, if it is not what they chose. The page
     # OFFERS a switch; nothing changes language on its own.
     detected = languages.detect_language(text)
-    return jsonify({"ok": True,
+    return jsonify({"ok": True, "notice": notice,
                     "ticket": as_customer_case(fresh or {}, with_messages=True),
                     "detected": detected if detected and detected != language
                                 else None,

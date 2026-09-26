@@ -384,7 +384,7 @@ function render(t){
     turn.appendChild(who);
     turn.appendChild(bubble);
 
-    if(m.is_ai) turn.appendChild(playButton(m.text, m.language));
+    if(m.playable) turn.appendChild(playButton(m.text, m.language));
     thread.appendChild(turn);
   });
 
@@ -429,7 +429,7 @@ function playButton(text, lang){
 let latest = null;              // {text, language} -- what the bar plays
 
 function renderPlayer(t){
-  const msgs = (t.messages || []).filter(m => m.is_ai);
+  const msgs = (t.messages || []).filter(m => m.playable);
   latest = msgs.length ? msgs[msgs.length - 1] : null;
   const bar = $("player");
   if(!latest || !SC.canSpeak || !SC.voiceOn){ bar.hidden = true; return; }
