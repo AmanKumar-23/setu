@@ -2046,6 +2046,40 @@ UI_STRINGS = {
     "note.assistantBusy": "Thanks — we have your message. Our assistant is taking longer than usual, so a member of our team will reply here shortly.",
     "chat.typing": "Setu is typing…",
     "play.noVoice": "This device has no {lang} voice to read this aloud",
+    "profile.open": "Profile settings",
+    "profile.back": "← Your tickets",
+    "profile.title": "Profile settings",
+    "profile.sub": "Your account, as we have it. Changes are saved straight away.",
+    "profile.details": "Account details",
+    "profile.name": "Name",
+    "profile.email": "Email",
+    "profile.username": "Username",
+    "profile.phone": "Phone",
+    "profile.phonePlaceholder": "+91 98765 43210",
+    "profile.phoneHint": "Optional. So a person can call you back if you ask.",
+    "profile.language": "Language",
+    "profile.memberSince": "Member since",
+    "profile.lastSignIn": "Last signed in",
+    "profile.readOnly": "Your email and username can't be changed here — they are how you sign in and how your tickets are filed. Raise a ticket if one needs to change.",
+    "profile.save": "Save changes",
+    "profile.saving": "Saving…",
+    "profile.saved": "Saved.",
+    "profile.passwordTitle": "Change password",
+    "profile.currentPassword": "Current password",
+    "profile.newPassword": "New password",
+    "profile.confirmPassword": "Confirm new password",
+    "profile.passwordHint": "At least 8 characters.",
+    "profile.updatePassword": "Update password",
+    "profile.passwordChanged": "Password changed.",
+    "profile.signOutTitle": "Sign out",
+    "profile.signOutBody": "End your session on this device and return to the sign-in page.",
+    "profile.signOut": "Sign out",
+    "profile.err.name": "Your name must be between 1 and 60 characters.",
+    "profile.err.phone": "Enter a phone number of 10 to 15 digits, optionally starting with +.",
+    "profile.err.current": "Your current password is not right.",
+    "profile.err.same": "The new password is the same as the current one.",
+    "profile.err.short": "The new password must be at least 8 characters.",
+    "profile.err.mismatch": "The two new passwords do not match.",
 }
 
 # Hindi is written by hand in i18n.js so the author can proofread it, and the
@@ -2175,6 +2209,57 @@ def faq_labels(language):
 
     _FAQ_LABELS[language] = translated
     return translated
+
+
+# ---------------------------------------------------------------------------
+# The customer's profile
+# ---------------------------------------------------------------------------
+@app.get("/portal/profile")
+@require_exact("customer")
+def portal_profile_page():
+    return send_from_directory(app.static_folder, "profile.html")
+
+
+@app.get("/api/portal/profile")
+@require_exact("customer")
+def portal_profile():
+    """Read from the users table itself -- the same row sign-in checks."""
+    return jsonify({"ok": True, "profile": auth.profile_of(signed_in_username())})
+
+
+def profile_refusal(error):
+    return jsonify({"ok": False, "code": getattr(error, "code", "other"),
+                    "error": str(error)}), 400
+
+
+@app.post("/api/portal/profile")
+@require_exact("customer")
+def portal_update_profile():
+    """Change the editable fields. Email and username are not read at all,
+    whatever the request sends -- they are read-only by design."""
+    body = request.json or {}
+    try:
+        auth.update_profile(signed_in_username(),
+                            display_name=body.get("display_name"),
+                            phone=body.get("phone"))
+    except ValueError as error:
+        return profile_refusal(error)
+    return jsonify({"ok": True, "profile": auth.profile_of(signed_in_username())})
+
+
+@app.post("/api/portal/password")
+@require_exact("customer")
+def portal_change_password():
+    body = request.json or {}
+    if (body.get("new") or "") != (body.get("confirm") or ""):
+        return jsonify({"ok": False, "code": "mismatch",
+                        "error": "The two new passwords do not match."}), 400
+    try:
+        auth.change_password(signed_in_username(), body.get("current"),
+                             body.get("new"))
+    except ValueError as error:
+        return profile_refusal(error)
+    return jsonify({"ok": True})
 
 
 @app.get("/api/portal/faqs")

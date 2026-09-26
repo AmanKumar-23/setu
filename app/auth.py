@@ -29,6 +29,7 @@ Flask -- no new dependency, and no home-made cryptography.
 
 import contextlib
 import os
+import re
 import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT UNIQUE NOT NULL,
     email              TEXT,
     preferred_language TEXT,
+    phone              TEXT,
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL,
     display_name  TEXT,
@@ -125,6 +127,9 @@ USER_MIGRATIONS = [
     # The language a customer is answered in, remembered across sessions.
     ("preferred_language",
      "ALTER TABLE users ADD COLUMN preferred_language TEXT"),
+    # A way to reach the customer other than email. Optional, and set by the
+    # customer from their profile -- sign-up does not ask for it.
+    ("phone", "ALTER TABLE users ADD COLUMN phone TEXT"),
 ]
 
 
@@ -334,6 +339,96 @@ def set_password(username, password):
                              locked_until = NULL
             WHERE username = ?
         """, (generate_password_hash(password), str(username).strip().lower()))
+
+
+# ---------------------------------------------------------------------------
+# The profile a customer can see and edit
+#
+# Editable: display name, phone, language, password (with the current one).
+# Read-only: email and username. The email is what they sign in with, and
+# changing it without verifying the new address is how a typo locks someone
+# out of their own account. The username is what every ticket is filed under.
+# ---------------------------------------------------------------------------
+PHONE_SHAPE = re.compile(r"\+?[0-9][0-9 \-]{8,18}[0-9]")
+
+
+class ProfileError(ValueError):
+    """A change the customer asked for that cannot be made. `code` lets the
+    page show the reason from its own catalogue, in the customer's language;
+    the message is the English fallback."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def profile_of(username):
+    """Everything the profile page shows, read from the users table itself."""
+    row = find_user(username)
+    if row is None:
+        return None
+
+    def col(name):
+        try:
+            return row[name]
+        except (IndexError, KeyError):
+            return None
+
+    return {
+        "username": row["username"],
+        "email": col("email"),
+        "display_name": row["display_name"] or row["username"],
+        "phone": col("phone") or "",
+        "language": col("preferred_language") or "en",
+        "role": row["role"],
+        "member_since": row["created_at"],
+        "last_sign_in": row["last_login_at"],
+    }
+
+
+def update_profile(username, display_name=None, phone=None):
+    """Change the editable fields. Raises ValueError with a readable reason."""
+    fields, values = [], []
+
+    if display_name is not None:
+        name = " ".join(str(display_name).split())
+        if not 1 <= len(name) <= 60:
+            raise ProfileError("name", "Your name must be between 1 and 60 characters.")
+        fields.append("display_name = ?")
+        values.append(name)
+
+    if phone is not None:
+        number = str(phone).strip()
+        if number and not PHONE_SHAPE.fullmatch(number):
+            raise ProfileError("phone", "Enter a phone number of 10 to 15 "
+                               "digits, optionally starting with +.")
+        digits = sum(ch.isdigit() for ch in number)
+        if number and not 10 <= digits <= 15:
+            raise ProfileError("phone", "Enter a phone number of 10 to 15 "
+                               "digits, optionally starting with +.")
+        fields.append("phone = ?")
+        values.append(number or None)          # empty clears it
+
+    if not fields:
+        return
+    if not find_user(username):
+        raise ValueError(f"No user {username!r}.")
+    with connect() as conn:
+        conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE username = ?",
+                     (*values, str(username).strip().lower()))
+
+
+def change_password(username, current, new):
+    """Change a password the owner knows. The CURRENT one is required: a
+    session left open on a shared computer must not be enough."""
+    row = find_user(username)
+    if row is None or not check_password_hash(row["password_hash"], current or ""):
+        raise ProfileError("current", "Your current password is not right.")
+    if (new or "") == (current or ""):
+        raise ProfileError("same", "The new password is the same as the current one.")
+    if len(new or "") < 8:
+        raise ProfileError("short", "The new password must be at least 8 characters.")
+    set_password(username, new)
 
 
 def set_active(username, active):

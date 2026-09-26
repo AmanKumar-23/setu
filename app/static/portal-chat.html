@@ -60,6 +60,9 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);
   color:var(--ink-3);margin-top:1px}
 .me .out{width:26px;height:26px;border:0;border-radius:50%;background:transparent;
   color:var(--ink-3);cursor:pointer;font-size:13px;transition:.15s}
+.melink{display:flex;align-items:center;gap:9px;color:inherit;
+  text-decoration:none;border-radius:999px}
+.melink:hover .mn{color:var(--brand)}
 .me .out:hover{background:var(--surface-3);color:var(--brand)}
 
 /* The same 24px gutter as the ticket list, so the two pages read as one
@@ -282,11 +285,13 @@ textarea:focus{border-color:#F0A88F;box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
       <span class="vdot"></span><span data-i18n="voice.button">Voice</span></button>
   </div>
   <div class="me" id="me" hidden>
-    <span class="av" id="meAv">?</span>
-    <span>
-      <span class="mn" id="meName">&mdash;</span>
-      <span class="mr" id="meRole">&mdash;</span>
-    </span>
+    <a class="melink" href="/portal/profile" data-i18n-title="profile.open">
+      <span class="av" id="meAv">?</span>
+      <span>
+        <span class="mn" id="meName" data-i18n-exempt>&mdash;</span>
+        <span class="mr" id="meRole" data-i18n-exempt>&mdash;</span>
+      </span>
+    </a>
     <button class="out" id="signOut" data-i18n-title="signOut"
             data-i18n-aria="signOut">&#9211;</button>
   </div>
