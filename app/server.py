@@ -1203,9 +1203,13 @@ def do_login():
     # confusing landing somewhere you did not expect.
     claimed = body.get("role")
     if claimed and claimed in auth.ROLES and claimed != user.role:
-        return jsonify({"ok": False, "error": (
-            f"That is a {user.role} account. Choose the "
-            f"{user.role.title()} card to sign in.")}), 403
+        # The password was RIGHT, so this is a different mistake from a wrong
+        # password and gets a different answer. `role` lets the page select
+        # the right card itself, so nobody has to guess which one they are.
+        return jsonify({"ok": False, "reason": "wrong_account_type",
+                        "role": user.role, "error": (
+            f"That is a {user.role} account, not {claimed}. We have "
+            f"selected the {user.role.title()} card \u2014 sign in again.")}), 403
 
     login_user(user, remember=False, duration=None)
     return jsonify({"ok": True, "user": user.as_dict(),
@@ -1224,6 +1228,10 @@ SIGNUP_ROLE = "customer"
 # then reads badly everywhere it is displayed.
 USERNAME_SHAPE = re.compile(r"[a-z0-9._-]{3,32}")
 
+# Deliberately loose: one @, something either side, a dot in the domain. The
+# point is to catch a typo'd form, not to re-implement RFC 5322.
+EMAIL_SHAPE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
 
 @app.post("/api/register")
 def register():
@@ -1234,9 +1242,17 @@ def register():
     """
     body = request.json or {}
     username = (body.get("username") or "").strip().lower()
+    email = (body.get("email") or "").strip().lower()
     password = body.get("password") or ""
     confirm = body.get("confirm") or ""
     display = (body.get("display_name") or "").strip()
+
+    # The sign-in form asks for an EMAIL. This route used to accept one and
+    # then never store it, so an account made here could only ever sign in by
+    # username -- and "the exact credentials I just registered with" failed.
+    if not EMAIL_SHAPE.fullmatch(email):
+        return jsonify({"ok": False,
+                        "error": "Enter a valid email address."}), 400
 
     if not USERNAME_SHAPE.fullmatch(username):
         return jsonify({"ok": False, "error": (
@@ -1249,7 +1265,7 @@ def register():
 
     try:
         auth.create_user(username, password, SIGNUP_ROLE,
-                         display_name=display or None)
+                         display_name=display or None, email=email)
     except ValueError as why:
         # create_user already refuses a short password and a duplicate name.
         return jsonify({"ok": False, "error": str(why)}), 400

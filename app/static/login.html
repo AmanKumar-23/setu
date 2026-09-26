@@ -548,10 +548,14 @@ $("modes").querySelectorAll("button").forEach(b => {
 // the page actually opens in rather than whatever the markup shipped with.
 setMode("signin");
 
-function fail(message){
+/* `keepPassword` is for the one failure where the password was RIGHT -- the
+   wrong card was chosen. Wiping it there would make them retype a correct
+   password, and the empty required field would stop the retry dead. */
+function fail(message, keepPassword){
   $("errText").textContent = message;
   $("err").hidden = false;
   busy(false);
+  if(keepPassword){ $("submit").focus(); return; }
   $("password").value = "";
   $("password").focus();
 }
@@ -708,7 +712,15 @@ $("form").addEventListener("submit", async e => {
     return fail("Could not reach the server. Is it still running?");
   }
 
-  if(!data.ok) return fail(data.error || (signingUp ? "Could not create that account." : "Sign in failed."));
+  if(!data.ok){
+    // Right password, wrong card: select the card the account actually
+    // belongs to, so the next press of Sign in simply works.
+    if(data.reason === "wrong_account_type" && data.role){
+      pickRole(data.role);
+      return fail(data.error, true);
+    }
+    return fail(data.error || (signingUp ? "Could not create that account." : "Sign in failed."));
+  }
 
   // The server decides, having checked both that the destination is a path
   // on this site and that this role can actually open it.

@@ -20,9 +20,13 @@ def client(srv):
 
 
 def signup(client, **over):
-    body = {"username": "newperson", "password": "a-good-password",
-            "confirm": "a-good-password"}
+    body = {"username": "newperson", "email": "newperson@example.com",
+            "password": "a-good-password", "confirm": "a-good-password"}
     body.update(over)
+    # Every account needs its own address, so derive one from the username
+    # unless the test is deliberately setting it.
+    if "email" not in over and "username" in over:
+        body["email"] = f"{over['username']}@example.com"
     return client.post("/api/register", json=body)
 
 
@@ -104,3 +108,105 @@ def test_the_display_name_is_optional(client):
     body = signup(client, username="noname").get_json()
     assert body["ok"] is True
     assert body["user"]["display_name"]
+
+
+
+# --------------------------------------------------------------------------
+# The bug this file was reopened for: the exact credentials used to register
+# did not sign back in. The route read the email and then never stored it,
+# so the account existed but could only be found by username -- and the
+# sign-in form asks for an email.
+# --------------------------------------------------------------------------
+def login(client, handle, password, role=None):
+    body = {"email": handle, "password": password}
+    if role:
+        body["role"] = role
+    return client.post("/api/login", json=body)
+
+
+def test_signup_logout_login_with_the_same_email_succeeds(client):
+    made = signup(client, username="lavyasree", email="lavyalav@gmail.com",
+                  password="lavya1234", confirm="lavya1234").get_json()
+    assert made["ok"] is True
+    assert made["user"]["email"] == "lavyalav@gmail.com"
+
+    client.post("/api/logout")
+    assert client.get("/api/me").status_code == 401
+
+    back = login(client, "lavyalav@gmail.com", "lavya1234", role="customer")
+    assert back.status_code == 200
+    body = back.get_json()
+    assert body["ok"] is True
+    assert body["next"] == "/portal"           # a customer lands in the portal
+
+
+def test_the_email_is_actually_persisted(client):
+    """Not just echoed back -- it has to be in the users table."""
+    import auth
+    signup(client, username="stored", email="Stored@Example.com")
+    row = auth.find_user("stored")
+    assert row["email"] == "stored@example.com"
+
+
+def test_email_login_ignores_case_and_surrounding_space(client):
+    signup(client, username="casey", email="casey@example.com")
+    client.post("/api/logout")
+    assert login(client, "  CASEY@Example.COM ", "a-good-password").status_code == 200
+
+
+def test_signing_up_without_an_email_is_refused(client):
+    body = signup(client, username="noemail", email="").get_json()
+    assert body["ok"] is False
+    assert "email" in body["error"].lower()
+
+
+def test_an_email_already_in_use_is_refused(client):
+    signup(client, username="first", email="shared@example.com")
+    client.post("/api/logout")
+    body = signup(client, username="second", email="shared@example.com").get_json()
+    assert body["ok"] is False
+
+
+def test_a_wrong_password_and_a_wrong_card_get_different_answers(client):
+    """A wrong password is vague on purpose. A RIGHT password on the wrong
+    card is a different mistake, and says which card to use."""
+    signup(client, username="twocards", email="twocards@example.com")
+    client.post("/api/logout")
+
+    wrong_pw = login(client, "twocards@example.com", "not-the-password",
+                     role="customer")
+    assert wrong_pw.status_code == 401
+    assert "password" in wrong_pw.get_json()["error"].lower()
+
+    wrong_card = login(client, "twocards@example.com", "a-good-password",
+                       role="agent")
+    assert wrong_card.status_code == 403
+    body = wrong_card.get_json()
+    assert body["reason"] == "wrong_account_type"
+    assert body["role"] == "customer"          # so the page can select it
+    assert "customer" in body["error"].lower()
+
+
+def test_no_card_at_all_signs_in_by_the_accounts_own_role(client):
+    """Nobody should have to guess a card: without one, the account's own
+    role decides where they land."""
+    signup(client, username="nocard", email="nocard@example.com")
+    client.post("/api/logout")
+    body = login(client, "nocard@example.com", "a-good-password").get_json()
+    assert body["ok"] is True and body["next"] == "/portal"
+
+
+def test_a_demo_account_made_before_emails_existed_gets_its_address(srv):
+    """The demo buttons sign in by email. An account created before the
+    column existed had none, so the buttons could never reach it."""
+    import auth
+    auth.create_user("priya", "whatever-it-was", "customer")      # no email
+    assert auth.find_user("priya")["email"] is None
+
+    auth.ensure_demo_users("demo-password-1")
+
+    row = auth.find_user("priya")
+    assert row["email"] == "priya@support-coach.local"
+    # ...and the password its owner set is untouched.
+    user, _ = auth.authenticate("priya@support-coach.local", "whatever-it-was")
+    assert user is not None

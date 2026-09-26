@@ -27,6 +27,7 @@ Passwords are stored as scrypt hashes by way of werkzeug, which ships with
 Flask -- no new dependency, and no home-made cryptography.
 """
 
+import contextlib
 import os
 import secrets
 import sqlite3
@@ -370,7 +371,7 @@ def authenticate(username, password):
         # Hash anyway. Returning instantly for an unknown user is a timing
         # side channel that leaks exactly which usernames are real.
         generate_password_hash(password or "x")
-        return None, "Wrong username or password."
+        return None, "Wrong email/username or password."
 
     locked = _lock_remaining(row["locked_until"])
     if locked:
@@ -382,7 +383,7 @@ def authenticate(username, password):
 
     if not check_password_hash(row["password_hash"], password or ""):
         _record_failure(row)
-        return None, "Wrong username or password."
+        return None, "Wrong email/username or password."
 
     with connect() as conn:
         conn.execute("""
@@ -584,8 +585,27 @@ def ensure_demo_users(password):
     """
     made = []
     for username, display, role, email in DEMO_USERS:
-        if find_user(username):
-            continue
-        create_user(username, password, role, display_name=display, email=email)
-        made.append(username)
+        row = find_user(username)
+        if row is None:
+            create_user(username, password, role, display_name=display,
+                        email=email)
+            made.append(username)
+        elif not row["email"]:
+            # An account made before the email column existed has none, so
+            # the demo buttons -- which sign in BY email -- could not reach
+            # it. Give it the address, and nothing else: the password stays
+            # whatever its owner set.
+            backfill_email(username, email)
+
+    # The seeded admin has the same history.
+    admin = os.getenv("ADMIN_USERNAME", "admin").strip().lower()
+    row = find_user(admin)
+    if row is not None and not row["email"]:
+        backfill_email(admin, os.getenv("ADMIN_EMAIL", "admin@support-coach.local"))
     return made
+
+
+def backfill_email(username, email):
+    """Set an email only if it is free. Never raises: a clash just skips."""
+    with contextlib.suppress(ValueError):
+        set_email(username, email)
