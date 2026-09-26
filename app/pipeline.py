@@ -34,13 +34,17 @@ AUTO_RESOLVE_THRESHOLD = 0.65
 # Wired by the server, which owns the clock and the audit trail. Same shape
 # as auth.configure() and metering.configure() -- one place that knows.
 _now_iso = None
+_handoff_fallback = None
 _record_proposals = None
 
 
-def configure(now_iso, record_proposals=None):
-    global _now_iso, _record_proposals
+def configure(now_iso, record_proposals=None, handoff_fallback=None):
+    global _now_iso, _record_proposals, _handoff_fallback
     _now_iso = now_iso
     _record_proposals = record_proposals
+    # (language) -> a ready-written handoff note, for when the model cannot
+    # write one. Lives in the server, where the translated catalogue is.
+    _handoff_fallback = handoff_fallback
 
 
 class TurnResult:
@@ -207,6 +211,54 @@ def _persist(sess, **kwargs):
     sess.persist(**kwargs)
 
 
+def apply_analysis(sess, analysis, text, *, reply_lang=None, how=None):
+    """Put one reading of `text` onto the case AND onto the message itself.
+
+    Shared by the live turn and by opening a case that was never analysed
+    (the model was down when it arrived), so the two cannot drift apart.
+    Returns (level, score, reasons).
+    """
+    state = sess.state
+    state.sentiment = analysis.get("sentiment", "unknown")
+    state.urgency = analysis.get("urgency", "unknown")
+    state.escalation_risk = analysis.get("escalation_risk", "unknown")
+    state.key_issue = analysis.get("key_issue", "")
+    state.frustration = analysis.get(
+        "frustration", FALLBACK_SCORE.get(state.escalation_risk, 35))
+    state.trend = analysis.get("trend", "flat")
+    # analyze_customer_message() has already forced these into their enums.
+    state.intent = analysis.get("intent", "")
+    state.intent_confidence = analysis.get("intent_confidence")
+    state.emotion = analysis.get("emotion", "")
+    note_redactions(sess)
+    sess.trajectory.append(state.frustration)
+
+    level, score, reasons = severity_of(analysis, text)
+    sess.severity = {"level": level, "score": score, "reasons": reasons}
+
+    if reply_lang is None:
+        reply_lang, how = languages.reply_language(
+            text, previous=getattr(sess, "language", None))
+
+    # The reading belongs to THIS message as well as to the case, so the
+    # history can be read back turn by turn -- and so a later, calmer message
+    # does not erase the record of the one that was not.
+    reading = {
+        "severity": level, "severity_score": score, "severity_reasons": reasons,
+        "sentiment": state.sentiment, "urgency": state.urgency,
+        "intent": state.intent, "intent_confidence": state.intent_confidence,
+        "emotion": state.emotion, "language": reply_lang, "language_how": how,
+    }
+    for message in reversed(state.history):
+        if message.speaker == "customer" and message.text == text:
+            message.analysis = reading
+            detected = languages.detect_message_language(text)
+            message.language = (reply_lang if detected == "devanagari"
+                                else detected or "")
+            break
+    return level, score, reasons
+
+
 def respond_to_customer(sess, text, *, language=None, commit=_persist):
     """Everything the model does for one customer message.
 
@@ -257,39 +309,8 @@ def respond_to_customer(sess, text, *, language=None, commit=_persist):
     elapsed = timings["analyse"]
 
     state = sess.state
-    state.sentiment = analysis.get("sentiment", "unknown")
-    state.urgency = analysis.get("urgency", "unknown")
-    state.escalation_risk = analysis.get("escalation_risk", "unknown")
-    state.key_issue = analysis.get("key_issue", "")
-    state.frustration = analysis.get(
-        "frustration", FALLBACK_SCORE.get(state.escalation_risk, 35))
-    state.trend = analysis.get("trend", "flat")
-    # analyze_customer_message() has already forced these into their enums.
-    state.intent = analysis.get("intent", "")
-    state.intent_confidence = analysis.get("intent_confidence")
-    state.emotion = analysis.get("emotion", "")
-    note_redactions(sess)
-    sess.trajectory.append(state.frustration)
-
-    level, score, reasons = severity_of(analysis, text)
-    sess.severity = {"level": level, "score": score, "reasons": reasons}
-
-    # The reading belongs to THIS message as well as to the case, so the
-    # history can be read back turn by turn -- and so a later, calmer message
-    # does not erase the record of the one that was not.
-    reading = {
-        "severity": level, "severity_score": score, "severity_reasons": reasons,
-        "sentiment": state.sentiment, "urgency": state.urgency,
-        "intent": state.intent, "intent_confidence": state.intent_confidence,
-        "emotion": state.emotion, "language": reply_lang, "language_how": how,
-    }
-    for message in reversed(state.history):
-        if message.speaker == "customer" and message.text == text:
-            message.analysis = reading
-            detected = languages.detect_message_language(text)
-            message.language = (reply_lang if detected == "devanagari"
-                                else detected or "")
-            break
+    level, score, reasons = apply_analysis(sess, analysis, text,
+                                           reply_lang=reply_lang, how=how)
 
     # Look up now rather than waiting for the agent to reply, so the facts are
     # on screen while they are still typing.
@@ -325,11 +346,30 @@ def respond_to_customer(sess, text, *, language=None, commit=_persist):
     # The assistant speaks to the customer only on a case it is handling. A
     # case a person has taken -- or an older one, from before the assistant
     # answered anyone -- gets a draft for that person instead.
-    why_a_person = handover_reason(sess, analysis)
-    if sess.handler == "ai" and why_a_person:
+    why_a_person = handover_reason(sess, analysis, level, reasons)
+    handed_over = sess.handler == "ai" and bool(why_a_person)
+    if handed_over:
         sess.handler = "human"
         sess.handover = {"at": _now_iso(), "why": why_a_person,
-                         "severity": level}
+                         "severity": level, "score": score}
+        # Said ONCE, at the moment a person takes over: their issue is heard,
+        # and someone is coming. In their language, and without a word about
+        # severity, queues or scores.
+        note_to_customer = ""
+        try:
+            note_to_customer = timed(
+                "handoff", sess.coach.handoff_message, text, state.history,
+                key_issue=state.key_issue, language_note=note)
+        except Exception:
+            note_to_customer = ""
+        if not note_to_customer and _handoff_fallback is not None:
+            note_to_customer = _handoff_fallback(reply_lang)
+        if note_to_customer:
+            # A Setu notice, not a reply: it does not stop the first-response
+            # clock or count as anyone resolving the case -- the person who
+            # answers next does both.
+            state.add_message("agent", note_to_customer, source="system",
+                              language=reply_lang)
     assistant_answers = sess.handler == "ai"
 
     auto = None
@@ -379,13 +419,19 @@ def respond_to_customer(sess, text, *, language=None, commit=_persist):
     return result
 
 
-def handover_reason(sess, analysis):
+def handover_reason(sess, analysis, level="low", reasons=()):
     """Why a person has to take this case, or "" if the assistant can.
 
-    The standing rule: nothing that moves money or closes an account happens
-    without a person. The assistant has no write tools on a customer's turn,
-    so all it could do with one of these is promise it -- which it must not.
+    High and critical severity: the customer is angry, threatening, or has
+    been let down enough that a person should be the one to answer.
+
+    And the standing rule: nothing that moves money or closes an account
+    happens without a person. The assistant has no write tools on a
+    customer's turn, so all it could do with one of these is promise it --
+    which it must not.
     """
+    if level in ("high", "critical"):
+        return f"severity {level}: " + "; ".join(reasons)
     if any(f.get("proposed") for f in (sess.facts or [])):
         return "a write action was proposed"
     if analysis.get("intent") in NEEDS_A_PERSON:

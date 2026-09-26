@@ -323,7 +323,11 @@ auth.configure(connect)
 actions.configure(connect)
 pipeline.configure(
     now_iso=lambda: now_iso(),
-    record_proposals=lambda sess: record_proposals(sess))
+    record_proposals=lambda sess: record_proposals(sess),
+    # Never a fresh model call: this is what is used when the model could not
+    # write the handoff itself.
+    handoff_fallback=lambda lang: ui_strings_cached(lang).get(
+        "handoff.escalated", UI_STRINGS["handoff.escalated"]))
 metering.configure(connect)
 
 # Every Gemini call the engine makes now reports its token count here. The
@@ -977,8 +981,24 @@ class LiveSession:
         self.state.emotion = case.get("emotion", "")
 
     def as_dict(self):
+        # The severity and the reasons behind it, for the Live Intelligence
+        # panel. An older case has none stored; it is read off the same
+        # readings the queue uses, so the panel and the queue always agree.
+        if self.severity:
+            severity = dict(self.severity)
+        elif self.state.escalation_risk not in (None, "", "unknown"):
+            level, score, reasons = severity_for({
+                "escalation_risk": self.state.escalation_risk,
+                "frustration": self.state.frustration})
+            severity = {"level": level, "score": score, "reasons": reasons}
+        else:
+            severity = {}
+
         return {
             "case_id": self.case_id,
+            "severity": severity,
+            "handover": self.handover,
+            "handler": self.handler,
             "history": [
                 {"speaker": m.speaker, "text": m.text,
                  "channel": getattr(m, "channel", "typed"),
@@ -2080,6 +2100,7 @@ UI_STRINGS = {
     "profile.err.same": "The new password is the same as the current one.",
     "profile.err.short": "The new password must be at least 8 characters.",
     "profile.err.mismatch": "The two new passwords do not match.",
+    "handoff.escalated": "I'm sorry this has been so difficult. I've asked a member of our support team to take over this conversation personally — they'll reply to you here shortly.",
 }
 
 # Hindi is written by hand in i18n.js so the author can proofread it, and the
@@ -2791,12 +2812,30 @@ def prepare_reopened_case(session):
     Returns a dict describing what it produced, or None when there was
     nothing to do.
     """
-    if session.last_suggestion or not session.last_customer_message:
+    if not session.last_customer_message:
         return None
 
     allowed, _why = metering.check_limits(signed_in_username())
     if not allowed:
         return None          # over budget: leave the panel honestly empty
+
+    # A case whose analysis never ran -- the model was down when the message
+    # arrived -- opened to "No signal" and "Nothing detected yet" for ever.
+    # Read it now, once, and it is on the case from then on.
+    analysed = False
+    if session.state.escalation_risk in (None, "", "unknown"):
+        try:
+            reading = session.coach.analyze_customer_message(
+                session.last_customer_message, session.state.history)
+            pipeline.apply_analysis(session, reading,
+                                    session.last_customer_message)
+            analysed = True
+        except Exception as error:
+            log.warning("analysis on open failed for %s: %s",
+                        session.case_id, error)
+
+    if session.last_suggestion:
+        return {"analysed": True} if analysed else None
 
     try:
         session.last_suggestion = session.coach.suggest_reply(
@@ -2996,22 +3035,72 @@ def timeline(cases, range_key=DEFAULT_RANGE):
 RISK_ORDER = {"high": 3, "medium": 2, "low": 1}
 
 
-def work_queue(cases, limit=8):
-    """Open cases, ranked by what an agent should pick up next.
+SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
-    Sorted by escalation risk first, then by age -- so the oldest of the
-    riskiest conversations sits at the top.
+
+def severity_for(case):
+    """The case's severity -- stored on anything analysed since the scale
+    existed, and read off the older readings for everything before it.
+
+    Older cases have an escalation risk and a 0-100 frustration score but no
+    severity. The same thresholds pipeline.severity_of() uses are applied to
+    those, so an old case and a new one with the same readings rank the same.
+    """
+    if case.get("severity") in SEVERITY_RANK:
+        return (case["severity"], case.get("severity_score"),
+                case.get("severity_reasons") or [])
+    score = case.get("frustration")
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        score = None
+    risk = case.get("escalation_risk")
+    if score is not None and score >= 85:
+        return "critical", score, [f"frustration {score}/100"]
+    if risk == "high" or (score is not None and score >= 65):
+        return "high", score, ["high escalation risk" if risk == "high"
+                               else f"frustration {score}/100"]
+    if risk == "medium" or (score is not None and score >= 35):
+        return "medium", score, ["some escalation risk"]
+    return "low", score, ["calm; nothing urgent"]
+
+
+def waiting_on_a_person(case):
+    """Open, and a person -- not the assistant -- has to answer it next.
+
+    A case the assistant is handling is not in anybody's queue: it has not
+    been escalated. A case with no handler at all predates the assistant and
+    was always a person's, so it stays exactly where it was.
+    """
+    if case.get("status") in CLOSED:
+        return False
+    return case.get("handler") != "ai"
+
+
+def work_queue(cases, limit=8):
+    """The Escalated Queue: open cases a person must answer, most urgent first.
+
+    Ordered by SEVERITY, then by how long the customer has waited -- so every
+    critical case sits above every high one, and among equals the one waiting
+    longest is first. Deterministic: ties on both fall back to the case id.
     """
     now = datetime.now(UTC)
     waiting = []
 
     for case in cases:
-        if case.get("status") in ("resolved", "auto_resolved"):
+        if not waiting_on_a_person(case):
             continue
 
         opened = parse_time(case.get("opened_at"))
+        level, score, reasons = severity_for(case)
         waiting.append({
             "id": case.get("id"),
+            "severity": level,
+            "severity_score": score,
+            "severity_reasons": reasons,
+            "handover": case.get("handover"),
+            "category": case.get("category") or "",
+            "subject": case.get("subject") or "",
             "escalation_risk": case.get("escalation_risk"),
             "frustration": case.get("frustration", 0),
             "turns": case.get("turns", 0),
@@ -3026,8 +3115,9 @@ def work_queue(cases, limit=8):
         })
 
     waiting.sort(key=lambda row: (
-        -RISK_ORDER.get(row["escalation_risk"], 0),   # riskiest first
-        -row["age_seconds"],                          # then oldest first
+        -SEVERITY_RANK.get(row["severity"], 0),       # most severe first
+        -row["age_seconds"],                          # then longest waiting
+        row["id"] or "",                              # then stable
     ))
 
     return {"queue": waiting[:limit], "total": len(waiting)}

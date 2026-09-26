@@ -1477,6 +1477,53 @@ The shape of your answer is fixed by the response schema, so just fill it in.
 
         return reading
 
+    def handoff_message(self, customer_message: str,
+                        conversation_history: Optional[List[Message]] = None,
+                        key_issue: str = "", language_note: str = "") -> str:
+        """What the customer reads at the moment a person takes over.
+
+        Written for THIS customer and THIS problem, in their language -- a
+        canned "your ticket has been escalated" is exactly the tone the moment
+        needs to avoid. It must reassure without exposing the machinery: no
+        severity, no queue, no score, no "escalation", no mention of AI. Metered
+        as its own step ("handoff").
+        """
+        self._operation = "handoff"
+
+        turns = list(conversation_history or [])
+        while turns and turns[-1].speaker == "agent":
+            turns.pop()
+        if not turns or turns[-1].text != customer_message:
+            turns.append(Message(speaker="customer", text=customer_message))
+        transcript = "\n".join(f"{t.speaker}: {t.text}" for t in turns[-8:])
+        redactor, (transcript, key_issue) = self._clean(transcript, key_issue or "")
+
+        english_rule = "" if language_note else "- Write in clear, simple English.\n"
+        prompt = f"""
+A customer is being handed from the automated assistant to a member of the
+support team, who will reply personally. Write the short message the
+customer sees at this moment.
+
+Conversation so far:
+{transcript}
+
+Their issue: {key_issue or "see the conversation"}
+
+Requirements:
+- Acknowledge their specific issue in one sentence, warmly. If they have been
+  let down or kept waiting, apologise for that plainly.
+- Tell them a member of our support team is taking over this conversation
+  personally and will reply here.
+- Do NOT mention escalation, severity, priority, queues, scores, tickets being
+  flagged, AI, bots, automation or systems. Speak like a person.
+- Do NOT promise a time, a refund, a replacement or any outcome.
+- Two or three short sentences.
+{english_rule}{language_note}"""
+
+        reply = self._ask_for_json(prompt, REPLY_SCHEMA)["reply"].strip()
+        self.last_redactions = redactor.log()
+        return redactor.restore(reply)
+
     def translate_for_agent(self, text: str) -> str:
         """Plain English for a message the customer wrote in their own script.
 

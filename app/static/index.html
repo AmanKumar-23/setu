@@ -148,6 +148,9 @@ body{
 .pill.medium,.pill.neutral{background:var(--amber-bg);color:var(--amber)}
 .pill.high,.pill.negative{background:var(--red-bg);color:var(--red)}
 .pill.none{background:var(--surface-3);color:var(--ink-3)}
+/* Severity: the four-level scale the queue is ordered by. Critical is the
+   one colour darker than high, so the two read as distinct at a glance. */
+.pill.critical{background:#FBE0DC;color:#9E1F14;box-shadow:inset 0 0 0 1px #F2B8AF}
 .pill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
 
 /* ---------------- hero risk ---------------- */
@@ -163,6 +166,16 @@ body{
 .shield.high{background:var(--red-bg)}
 
 /* ---------------- extracted intent ---------------- */
+/* Why this case is where it is: the severity, its score, and the rule that
+   put it there -- so an escalation is never just a colour. */
+.sev{border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-top:10px}
+.sev[hidden]{display:none}
+.sev .shead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.sev .k{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3)}
+.sev .sscore{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.sev ul{margin:0;padding-left:16px;font-size:12px;color:var(--ink-2);line-height:1.55}
+.sev .handed{margin-top:7px;font-size:11.5px;font-weight:650;color:var(--red)}
 .intent{border:1px solid var(--line);border-radius:12px;padding:12px 13px;
   background:var(--surface-2);margin-top:16px}
 .ihead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
@@ -492,6 +505,8 @@ textarea::placeholder{color:var(--ink-3)}
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
   overflow:hidden;word-break:break-word}
 .qmsg.idle{color:var(--ink-3);font-style:italic}
+.qcat{margin-left:auto;font-size:10.5px;font-weight:650;color:var(--ink-3);
+  max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qfoot{display:flex;align-items:center;justify-content:space-between;gap:8px;
   margin-top:8px;font-size:10.5px;color:var(--ink-3);font-family:var(--mono)}
 .qempty{border:1px dashed var(--line-2);border-radius:13px;padding:18px 14px;
@@ -618,7 +633,7 @@ textarea::placeholder{color:var(--ink-3)}
         <input id="qSearch" type="search" autocomplete="off"
                placeholder="Search case or message…" aria-label="Search the queue">
       </label>
-      <span class="chips" id="qChips" role="group" aria-label="Filter by risk"></span>
+      <span class="chips" id="qChips" role="group" aria-label="Filter by severity"></span>
     </div>
     <div class="qlist" id="qList" role="listbox" aria-label="Cases waiting"></div>
     <div class="qhint">
@@ -644,6 +659,15 @@ textarea::placeholder{color:var(--ink-3)}
               <div class="heroval none" id="riskVal">No signal</div>
               <div class="herosub" id="riskSub">Send a customer message to begin.</div>
             </div>
+          </div>
+          <div class="sev" id="sevBox" hidden>
+            <div class="shead">
+              <span class="k">Severity</span>
+              <span class="pill none" id="sevPill">&mdash;</span>
+              <span class="sscore" id="sevScore"></span>
+            </div>
+            <ul id="sevWhy"></ul>
+            <div class="handed" id="sevHanded" hidden></div>
           </div>
           <div class="intent">
             <div class="ihead">
@@ -859,6 +883,16 @@ function setBusy(on){
 /* ---------------- render ---------------- */
 let lastHistory = [];
 
+/* Who wrote an outgoing line. Since the assistant answers customers itself,
+   "agent" alone would make its replies -- and Setu's own notices -- look like
+   a colleague's. The customer's page already draws the same distinction. */
+function whoSaid(m){
+  if(m.speaker !== "agent") return m.speaker;
+  if(m.source === "ai") return "assistant";
+  if(m.source === "system") return "setu \u00b7 automatic notice";
+  return m.author ? m.author : "agent";
+}
+
 function renderStream(history){
   const box = $("stream");
   lastHistory = history || [];
@@ -876,7 +910,7 @@ function renderStream(history){
   }
   box.innerHTML = history.map(m => `
     <div class="turn ${m.speaker}">
-      <div class="who">${m.speaker}${m.channel === "voice"
+      <div class="who">${whoSaid(m)}${m.channel === "voice"
         ? '<span class="viacon" title="Dictated, not typed">🎙 voice</span>' : ""}</div>
       <div class="bubble"></div>
     </div>`).join("");
@@ -1002,6 +1036,26 @@ document.addEventListener("click", e => {
   if(button) decide(button.dataset.id, button.dataset.decide);
 });
 
+/* The severity, its 0-100 score, and every rule that fired -- plus, when the
+   assistant handed this case over, the reason it gave. */
+function paintSeverity(s){
+  const sev = s.severity || {}, box = $("sevBox");
+  if(!SEV_LABEL[sev.level]){ box.hidden = true; return; }
+  box.hidden = false;
+  $("sevPill").className = "pill " + sev.level;
+  $("sevPill").textContent = SEV_LABEL[sev.level];
+  $("sevScore").textContent = sev.score != null ? `${sev.score}/100` : "";
+  $("sevWhy").innerHTML = "";
+  (sev.reasons || []).forEach(why => {
+    const li = document.createElement("li");
+    li.textContent = why;
+    $("sevWhy").appendChild(li);
+  });
+  const handed = s.handover && s.handover.why;
+  $("sevHanded").hidden = !handed;
+  $("sevHanded").textContent = handed ? "Handed to a person \u2014 " + s.handover.why : "";
+}
+
 function renderIntel(s){
   const risk = s.escalation_risk, b = band(risk);
 
@@ -1013,6 +1067,8 @@ function renderIntel(s){
     + (s.frustration ? `  ·  ${s.frustration}/100 ${arrow}` : "");
   $("shield").className = "shield " + b;
   $("shield").textContent = SHIELD[risk] || "🛡️";
+
+  paintSeverity(s);
 
   const sent = $("mSent"), urg = $("mUrg"), emo = $("mEmo");
   sent.className = "pill " + tone(s.sentiment);
@@ -1678,16 +1734,20 @@ $("voiceToggle").onclick = () => {
  */
 let QUEUE = [], qFilter = "all", qQuery = "", qCursor = -1, qOpen = null;
 
-// "Critical" is not a value this app stores -- escalation risk is low /
-// medium / high. It is defined here as high risk that is ALSO past its
-// first-reply target or close to it: the ones actually on fire rather than
-// merely serious. Critical is therefore a subset of High.
+// Critical and High are severity levels the server stores on every case and
+// orders the queue by. "High" shows high AND critical -- everything at least
+// that serious -- so Critical stays a subset of High, as it always was.
 const Q_FILTERS = {
   all:      () => true,
-  critical: row => row.escalation_risk === "high"
-                && ["breached", "at_risk"].includes((row.sla || {}).status),
-  high:     row => row.escalation_risk === "high",
+  critical: row => row.severity === "critical",
+  high:     row => row.severity === "high" || row.severity === "critical",
 };
+const SEV_LABEL = {critical: "Critical", high: "High", medium: "Medium", low: "Low"};
+
+function escAttr(text){
+  return String(text || "").replace(/[&<>"]/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
 
 function waited(seconds){
   if(!seconds || seconds < 0) return "just now";
@@ -1734,19 +1794,27 @@ function renderQueue(){
             data-i="${i}" aria-current="${row.id === qOpen}">
       <div class="qtop">
         <span class="qid">${row.id}</span>
-        <span class="pill ${["low","medium","high"].includes(row.escalation_risk)
-          ? row.escalation_risk : "none"}"><i></i>${row.escalation_risk || "—"}</span>
+        <span class="pill ${SEV_LABEL[row.severity] ? row.severity : "none"}"
+              title="${escAttr((row.severity_reasons || []).join("; "))}"><i></i>${
+          SEV_LABEL[row.severity] || "—"}</span>
+        <span class="qcat" data-cat="${i}"></span>
       </div>
-      <div class="qmsg${row.first_message ? "" : " idle"}" data-msg="${i}"></div>
+      <div class="qmsg${row.first_message || row.subject ? "" : " idle"}" data-msg="${i}"></div>
       <div class="qfoot"><span>Risk: ${row.frustration || 0}</span>
         <span>${waited(row.age_seconds)}</span></div>
     </button>`).join("");
 
-  // A customer's own words go in as text, never as markup.
+  // A customer's own words go in as text, never as markup. The subject they
+  // gave leads, when there is one; the first message fills in otherwise.
   list.querySelectorAll("[data-msg]").forEach(el => {
     const row = rows[Number(el.dataset.msg)];
-    el.textContent = row.first_message || row.key_issue || "No message yet";
+    el.textContent = row.subject && row.first_message
+      ? `${row.subject} \u2014 ${row.first_message}`
+      : (row.subject || row.first_message || row.key_issue || "No message yet");
     el.title = el.textContent;
+  });
+  list.querySelectorAll("[data-cat]").forEach(el => {
+    el.textContent = rows[Number(el.dataset.cat)].category || "";
   });
 
   paintCursor();

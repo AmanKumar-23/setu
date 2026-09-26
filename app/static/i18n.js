@@ -165,6 +165,7 @@
     "profile.err.same": "The new password is the same as the current one.",
     "profile.err.short": "The new password must be at least 8 characters.",
     "profile.err.mismatch": "The two new passwords do not match.",
+    "handoff.escalated": "I'm sorry this has been so difficult. I've asked a member of our support team to take over this conversation personally — they'll reply to you here shortly.",
   };
 
   /* Hindi, written by hand rather than bought from the model, so the two
@@ -310,6 +311,7 @@
     "profile.err.same": "नया पासवर्ड मौजूदा पासवर्ड जैसा ही है।",
     "profile.err.short": "नया पासवर्ड कम से कम 8 अक्षरों का होना चाहिए।",
     "profile.err.mismatch": "दोनों नए पासवर्ड मेल नहीं खाते।",
+    "handoff.escalated": "मुझे खेद है कि आपको इतनी परेशानी हुई। मैंने हमारी सपोर्ट टीम के एक सदस्य से यह बातचीत ख़ुद संभालने को कहा है — वे जल्द ही यहीं आपको जवाब देंगे।",
   };
 
   /* Bumped whenever the English changes, so a browser that cached a
