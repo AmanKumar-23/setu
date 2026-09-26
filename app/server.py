@@ -2068,6 +2068,12 @@ def ui_strings(language):
     so a language is a fixed one-off cost however many customers sign in.
     """
     language = languages.normalise(language)
+    # Hindi is the hand-written seed from i18n.js, NOT English. Returning
+    # English here -- on the theory that the page had its own copy -- is
+    # exactly what used to happen, and the page applied its Hindi and then
+    # overwrote it with this English the moment the request came back.
+    if language == "hi":
+        return _seeded_hindi()
     if language in SEEDED_LANGUAGES:
         return dict(UI_STRINGS)
     if language in _UI_CACHE:

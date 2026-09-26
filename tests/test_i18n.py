@@ -130,7 +130,7 @@ def test_english_and_hindi_never_ask_the_model(srv, monkeypatch):
     monkeypatch.setattr(srv.session.coach, "translate_lines", boom)
     srv._UI_CACHE.clear()
     assert srv.ui_strings("en") == srv.UI_STRINGS
-    assert srv.ui_strings("hi") == srv.UI_STRINGS
+    srv.ui_strings("hi")                       # no model call either way
 
 
 # --------------------------------------------- what must never be a key
@@ -154,3 +154,27 @@ def test_the_three_customer_states_are_all_keyed(srv):
 def test_every_category_is_keyed(srv):
     for category in srv.CATEGORIES:
         assert "cat." + category in srv.UI_STRINGS
+
+
+
+def test_the_server_sends_the_same_hindi_the_page_ships(srv, js):
+    """The regression this file missed. The server used to answer "hi" with
+    the ENGLISH table, on the theory that the page had its own Hindi. The
+    page did -- it applied it, then the server's answer arrived and
+    overwrote every string with English, and a reload was English from the
+    start. The two must be the same Hindi, key for key."""
+    assert srv.ui_strings("hi") == js["hi"]
+
+
+def test_signing_in_with_hindi_chosen_paints_hindi(srv):
+    import auth
+    auth.harden(srv.app, local_only=True)
+    srv.app.config["TESTING"] = True
+    auth.create_user("priya", "customer-pw", "customer")
+    auth.set_language("priya", "hi")
+    client = srv.app.test_client()
+    client.post("/api/login", json={"username": "priya", "password": "customer-pw"})
+    strings = client.get("/api/portal/languages").get_json()["strings"]
+    assert strings["tickets.title"] != srv.UI_STRINGS["tickets.title"]
+    switched = client.post("/api/portal/language", json={"language": "hi"}).get_json()
+    assert switched["strings"]["tickets.title"] == strings["tickets.title"]
