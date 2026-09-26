@@ -37,14 +37,7 @@
 
     /* ---- common issues ---- */
     "faq.title": "Common issues — find your answer instantly",
-    "faq.sub": "Tap one and we will try to answer it straight away.",
-    "faq.looking": "Looking that up…",
-    "faq.answer": "Answer",
-    "faq.solved": "This solved it",
-    "faq.needHelp": "I still need help",
-    "faq.sorted": "Sorted",
-    "faq.gladThatHelped":
-      "Glad that helped. Nothing else to do — no ticket was raised.",
+    "faq.sub": "Tap one to start a conversation about it straight away.",
 
     /* ---- the ticket list ---- */
     "tickets.title": "Your tickets",
@@ -129,6 +122,12 @@
     "rate.couldNotSave": "Could not save that.",
     "rate.thanks": "Thanks for rating this",
     "rate.ariaStars": "Rate from 1 to 5",
+    "faq.opening": "Opening a ticket…",
+    "faq.showAll": "Show all {n}",
+    "faq.showFewer": "Show fewer",
+    "faq.couldNotOpen": "Could not open a ticket. Try again, or use New support request.",
+    "cat.Billing & Payments": "Billing & Payments",
+    "cat.App & Technical": "App & Technical",
   };
 
   /* Hindi, written by hand rather than bought from the model, so the two
@@ -153,14 +152,7 @@
       "⚠ इसे जाँच लें — हमें ठीक से सुनाई नहीं दिया।",
 
     "faq.title": "आम समस्याएं — तुरंत जवाब पाएं",
-    "faq.sub": "एक चुनें और हम तुरंत जवाब देने की कोशिश करेंगे।",
-    "faq.looking": "देख रहे हैं…",
-    "faq.answer": "जवाब",
-    "faq.solved": "इससे हल हो गया",
-    "faq.needHelp": "मुझे अब भी मदद चाहिए",
-    "faq.sorted": "हो गया",
-    "faq.gladThatHelped":
-      "अच्छा लगा कि मदद मिली। और कुछ करने की ज़रूरत नहीं — कोई टिकट नहीं बना।",
+    "faq.sub": "एक चुनें और उसी पर तुरंत बातचीत शुरू करें।",
 
     "tickets.title": "आपके टिकट",
     "tickets.tagline": "जहाँ सुरक्षित हो वहाँ AI। जहाँ ज़रूरी हो वहाँ इंसान।",
@@ -238,7 +230,17 @@
     "rate.couldNotSave": "यह सहेजा नहीं जा सका।",
     "rate.thanks": "रेट करने के लिए धन्यवाद",
     "rate.ariaStars": "1 से 5 तक रेट करें",
+    "faq.opening": "टिकट खोल रहे हैं…",
+    "faq.showAll": "सभी {n} दिखाएँ",
+    "faq.showFewer": "कम दिखाएँ",
+    "faq.couldNotOpen": "टिकट नहीं खुल पाया। फिर कोशिश करें, या नया अनुरोध चुनें।",
+    "cat.Billing & Payments": "बिलिंग और भुगतान",
+    "cat.App & Technical": "ऐप और तकनीकी",
   };
+
+  /* Bumped whenever the English changes, so a browser that cached a
+     translation of the old words fetches the new ones. */
+  SC.CATALOGUE = "2";
 
   SC.EN = EN;
   SC.strings = EN;

@@ -127,6 +127,98 @@ FAQS = [
                 "once. Let me take ownership of this and get it resolved today.",
         "keywords": ["cancel", "legal", "complaint", "consumer court", "escalate"],
     },
+
+    # ------------------------------------------------------------------
+    # Portal-only topics. The six above are also the agent console's chips
+    # and the dashboard's Knowledge groups, and those stay exactly as they
+    # were; these appear only on the customer's Common issues card.
+    #
+    # Chosen from two sources, and it is worth saying which is which:
+    #   FROM THE DATA   invoice, bulk -- the only two subjects in the saved
+    #                   cases that none of the six above already covered
+    #   FROM THE BRIEF  the other six. None of them occurs in the cases yet;
+    #                   their live counts will say whether they earn a place.
+    # ------------------------------------------------------------------
+    {
+        "id": "payment", "icon": "💳", "portal_only": True,
+        "label": "Payment failed but charged",
+        "question": "My payment failed but the amount was still charged to my "
+                    "card or UPI. Please help me get it back.",
+        "text": "I can see the payment did not complete. Let me check what "
+                "was charged and start the reversal for you.",
+        # Not bare "payment": recharge tickets say "the payment was captured"
+        # and would all be counted here too, inflating this tag with another's.
+        "keywords": ["payment failed", "payment declined", "card declined",
+                     "charged twice", "debited twice", "double charged",
+                     "transaction failed", "upi failed"],
+    },
+    {
+        "id": "wrong-item", "icon": "📦", "portal_only": True,
+        "label": "Wrong item delivered",
+        "question": "I received the wrong item in my order. I need the "
+                    "correct one or a replacement.",
+        "text": "Sorry you received the wrong item. Let me arrange the "
+                "correct one and a pickup for this one.",
+        "keywords": ["wrong item", "wrong product", "different product",
+                     "incorrect item", "not what i ordered", "replacement"],
+    },
+    {
+        "id": "locked", "icon": "🔒", "portal_only": True,
+        "label": "Account locked / suspended",
+        "question": "My account has been locked or suspended and I cannot "
+                    "use it. Why, and how do I get it back?",
+        "text": "Let me look at why the account was locked and get you back "
+                "in safely.",
+        "keywords": ["locked", "suspended", "blocked", "deactivated",
+                     "account disabled"],
+    },
+    {
+        "id": "subscription", "icon": "📅", "portal_only": True,
+        "label": "Plan or subscription not activated",
+        "question": "I paid for a plan or subscription but it has not been "
+                    "activated on my account.",
+        "text": "Let me check the payment against the plan and get it "
+                "switched on for you.",
+        "keywords": ["subscription", "plan not activated", "not activated",
+                     "pack not", "plan not active"],
+    },
+    {
+        "id": "app-crash", "icon": "📱", "portal_only": True,
+        "label": "App keeps crashing",
+        "question": "The app keeps crashing or freezing when I open it.",
+        "text": "Sorry about the crashes. Let me get your device and app "
+                "version so we can find the cause.",
+        "keywords": ["crash", "crashing", "freez", "app not opening",
+                     "app closes", "hangs"],
+    },
+    {
+        "id": "profile", "icon": "👤", "portal_only": True,
+        "label": "Unable to update profile",
+        "question": "I cannot update my profile details -- the change does "
+                    "not save.",
+        "text": "Let me look at what is stopping the change from saving on "
+                "your profile.",
+        "keywords": ["update profile", "change my name", "update my details",
+                     "profile not", "change address", "update address"],
+    },
+    {
+        "id": "invoice", "icon": "🧾", "portal_only": True,
+        "label": "Need a GST invoice or bill",
+        "question": "I need a GST invoice or a bill for my purchase.",
+        "text": "Happy to help with the invoice. Let me pull the order it "
+                "belongs to.",
+        "keywords": ["invoice", "gst", "bill copy", "receipt", "tax invoice"],
+    },
+    {
+        "id": "bulk", "icon": "🏢", "portal_only": True,
+        "label": "Bulk or business order",
+        "question": "I want to place a bulk order for my business. Is there a "
+                    "corporate discount?",
+        "text": "Thanks for thinking of us for your business. Let me connect "
+                "you with the right team.",
+        "keywords": ["bulk", "corporate", "business order", "employees",
+                     "wholesale"],
+    },
 ]
 
 
@@ -612,6 +704,9 @@ class LiveSession:
         self.customer = None
         self.subject = ""
         self.category = ""
+        # Where the ticket came from: "form", or "tag:<id>" for a Common
+        # issues shortcut -- so the analytics can say which tags earn a place.
+        self.origin = ""
         # The language the REPLY is written in. Analysis stays English.
         self.language = DEFAULT_LANGUAGE
         self.opened_at = None
@@ -665,6 +760,7 @@ class LiveSession:
             "customer": self.customer,
             "subject": self.subject,
             "category": self.category,
+            "origin": self.origin,
             "language": self.language,
             "opened_at": self.opened_at,
             "first_response_at": self.first_response_at,
@@ -782,6 +878,7 @@ class LiveSession:
         self.customer = case.get("customer")
         self.subject = case.get("subject") or ""
         self.category = case.get("category") or ""
+        self.origin = case.get("origin") or ""
         self.language = case.get("language") or DEFAULT_LANGUAGE
         self.opened_at = case.get("opened_at")
         self.first_response_at = case.get("first_response_at")
@@ -1308,7 +1405,8 @@ CUSTOMER_STATES = {
 }
 
 CATEGORIES = ["Recharge", "Refund", "Order & Delivery", "Network",
-              "Account & Login", "Other"]
+              "Account & Login", "Billing & Payments", "App & Technical",
+              "Other"]
 
 FAQ_MISS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS faq_misses (
@@ -1354,7 +1452,14 @@ def faq_misses():
 FAQ_CATEGORY = {
     "recharge": "Recharge", "refund": "Refund", "delivery": "Order & Delivery",
     "network": "Network", "account": "Account & Login", "escalate": "Other",
+    "payment": "Billing & Payments", "wrong-item": "Order & Delivery",
+    "locked": "Account & Login", "subscription": "Billing & Payments",
+    "app-crash": "App & Technical", "profile": "Account & Login",
+    "invoice": "Billing & Payments", "bulk": "Other",
 }
+
+# The console's chips and the dashboard's Knowledge groups: the original six.
+CONSOLE_FAQS = [f for f in FAQS if not f.get("portal_only")]
 
 
 def customer_status_of(case):
@@ -1524,6 +1629,9 @@ def portal_new_ticket():
     sess.subject = subject[:120]
     sess.category = category
     sess.language = language
+    tag = body.get("tag")
+    sess.origin = (f"tag:{tag}" if any(f["id"] == tag for f in FAQS)
+                   else "form")
 
     try:
         pipeline.run_customer_turn(
@@ -1607,13 +1715,7 @@ UI_STRINGS = {
     "voice.nothingHeard": "We did not hear anything. Try again, or type it.",
     "voice.lowConfidence": "⚠ Check this — we were not sure we heard it right.",
     "faq.title": "Common issues — find your answer instantly",
-    "faq.sub": "Tap one and we will try to answer it straight away.",
-    "faq.looking": "Looking that up…",
-    "faq.answer": "Answer",
-    "faq.solved": "This solved it",
-    "faq.needHelp": "I still need help",
-    "faq.sorted": "Sorted",
-    "faq.gladThatHelped": "Glad that helped. Nothing else to do — no ticket was raised.",
+    "faq.sub": "Tap one to start a conversation about it straight away.",
     "tickets.title": "Your tickets",
     "tickets.tagline": "AI where it’s safe. Human where it matters.",  # noqa: RUF001
     "tickets.welcome": "Welcome back, {name}",
@@ -1684,6 +1786,12 @@ UI_STRINGS = {
     "rate.couldNotSave": "Could not save that.",
     "rate.thanks": "Thanks for rating this",
     "rate.ariaStars": "Rate from 1 to 5",
+    "faq.opening": "Opening a ticket…",
+    "faq.showAll": "Show all {n}",
+    "faq.showFewer": "Show fewer",
+    "faq.couldNotOpen": "Could not open a ticket. Try again, or use New support request.",
+    "cat.Billing & Payments": "Billing & Payments",
+    "cat.App & Technical": "App & Technical",
 }
 
 # Hindi is written by hand in i18n.js so the author can proofread it, and the
@@ -3038,7 +3146,7 @@ def faqs():
     blobs = [haystack(c) for c in cases]
 
     rows = []
-    for faq in FAQS:
+    for faq in CONSOLE_FAQS:
         count = sum(
             1 for blob in blobs
             if any(word in blob for word in faq["keywords"])
@@ -3054,7 +3162,7 @@ def faqs():
         "faqs": rows,
         "ranked": sorted(rows, key=lambda r: -r["count"]),
         "matched": sum(1 for b in blobs if any(
-            w in b for f in FAQS for w in f["keywords"])),
+            w in b for f in CONSOLE_FAQS for w in f["keywords"])),
         "total_cases": len(cases),
     })
 

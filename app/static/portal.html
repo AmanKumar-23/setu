@@ -136,6 +136,13 @@ tbody tr:hover{background:var(--surface-2)}
 .faq .lab{flex:1;min-width:0;font-size:12.5px;font-weight:650;color:var(--ink);
   line-height:1.35}
 .faq .n{font-size:11px;font-family:var(--mono);color:var(--ink-3);flex:0 0 auto}
+.faq:disabled{cursor:default;opacity:.55;transform:none}
+.faq .spin.dark{border-color:rgba(239,78,43,.25);border-top-color:var(--brand);
+  margin:0;width:13px;height:13px}
+.faqmore{margin-top:10px;background:none;border:0;padding:4px 2px;cursor:pointer;
+  font-family:var(--sans);font-size:12.5px;font-weight:650;color:var(--brand)}
+.faqmore:hover{text-decoration:underline}
+.faqmore[hidden]{display:none}
 
 .answer{margin-top:14px;border:1px solid #BFE3CD;background:#F2FAF5;border-radius:14px;
   padding:15px 16px}
@@ -258,6 +265,7 @@ tbody tr:hover{background:var(--surface-2)}
       <h2 id="faqTitle" data-i18n="faq.title">Common issues &mdash; find your answer instantly</h2>
       <div class="sub" id="faqSub" data-i18n="faq.sub">Tap one and we will try to answer it straight away.</div>
       <div class="faqgrid" id="faqGrid"></div>
+      <button class="faqmore" id="faqMore" type="button" hidden></button>
       <div id="faqOut"></div>
     </div>
 
@@ -531,101 +539,87 @@ $("signOut").onclick = async () => {
 };
 
 /* ---------------- common issues ----------------
-   Six groups, the same ones the Knowledge section counts, labelled in the
-   customer's language. Clicking searches the knowledge base first: a
-   confident answer means no ticket at all. */
+   Every tag is a shortcut into a real conversation. A click raises a
+   ticket already filled in with that issue -- the customer's words are the
+   label they clicked, in their own language -- and goes straight to its
+   chat. There is no intermediate "looking that up" state to get stuck in.
+
+   The counts are live: /api/portal/faqs counts the saved cases on every
+   load, so a tag nobody uses shows no number rather than a made-up one. */
 
 let FAQS = [];
+let FAQ_OPEN = false;          // is the full list showing?
+const FAQ_FOLD = 9;            // three rows on a laptop, then "Show all"
+let OPENING = null;            // the tag whose ticket is being raised
 
 async function loadFaqs(){
   try{
     const d = await (await fetch("/api/portal/faqs")).json();
     if(!d.ok || !d.faqs || !d.faqs.length) return;
     FAQS = d.faqs;
-    $("faqGrid").innerHTML = FAQS.map(f => `
-      <button class="faq" data-faq="${esc(f.id)}">
-        <span class="em">${f.icon}</span>
-        <span class="lab">${esc(f.label)}</span>
-        ${f.count ? `<span class="n">${f.count}</span>` : ""}
-      </button>`).join("");
-    $("faqGrid").querySelectorAll("[data-faq]").forEach(b => {
-      b.onclick = () => askFaq(b.dataset.faq);
-    });
+    paintFaqs();
     $("faqs").hidden = false;
   }catch(e){ /* the ticket list is the page; this card is a bonus */ }
 }
 
+function paintFaqs(){
+  const shown = FAQ_OPEN ? FAQS : FAQS.slice(0, FAQ_FOLD);
+  $("faqGrid").innerHTML = shown.map(f => `
+    <button class="faq" data-faq="${esc(f.id)}"${OPENING ? " disabled" : ""}>
+      <span class="em">${f.icon}</span>
+      <span class="lab">${esc(OPENING === f.id ? T("faq.opening") : f.label)}</span>
+      ${OPENING === f.id ? '<span class="spin dark"></span>'
+        : f.count ? `<span class="n">${f.count}</span>` : ""}
+    </button>`).join("");
+  $("faqGrid").querySelectorAll("[data-faq]").forEach(b => {
+    b.onclick = () => openFromTag(b.dataset.faq);
+  });
+
+  const more = FAQS.length - FAQ_FOLD;
+  $("faqMore").hidden = more <= 0;
+  $("faqMore").textContent = FAQ_OPEN ? T("faq.showFewer")
+                                      : T("faq.showAll", {n: FAQS.length});
+}
+
 function faqById(id){ return FAQS.find(f => f.id === id) || {}; }
 
-async function askFaq(id){
+/* One click: a ticket in the backend, then its chat. The subject stays the
+   English label so the agent console and the Knowledge grouping keep reading
+   one vocabulary; the first message is what the customer actually saw. */
+async function openFromTag(id){
+  if(OPENING) return;
   const faq = faqById(id);
-  $("faqOut").innerHTML =
-    `<div class="thinking"><span class="spin"></span>${esc(T("faq.looking"))}</div>`;
+  OPENING = id;
+  $("faqOut").innerHTML = "";
+  paintFaqs();
 
   let d;
   try{
-    d = await (await fetch("/api/portal/faq/" + encodeURIComponent(id),
-                           {method: "POST"})).json();
+    d = await (await fetch("/api/portal/tickets", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        subject: faq.english || faq.label,
+        category: faq.category,
+        description: faq.label,
+        channel: "typed",
+        tag: faq.id,
+      }),
+    })).json();
   }catch(e){ d = {ok: false}; }
 
-  $("faqOut").innerHTML = "";
-
-  if(!d || !d.ok || !d.answered){
-    // No confident article. Straight to a ticket, with the category filled in
-    // so the customer does not have to classify their own problem.
-    openModal({category: (d && d.category) || faq.category,
-               subject: faq.english || faq.label});
+  if(d && d.ok && d.ticket && d.ticket.id){
+    location.href = "/portal/chat/" + encodeURIComponent(d.ticket.id);
     return;
   }
 
-  showAnswer(id, d.answer);
+  // Never a dead end: say so plainly, and leave the tags usable.
+  OPENING = null;
+  paintFaqs();
+  $("faqOut").innerHTML = `<div class="notice" role="alert"></div>`;
+  $("faqOut").firstElementChild.textContent = (d && d.error) || T("faq.couldNotOpen");
 }
 
-function showAnswer(id, answer){
-  const faq = faqById(id);
-  $("faqOut").innerHTML = `
-    <div class="answer">
-      <div class="k">${esc(T("faq.answer"))}</div>
-      <div class="txt" id="faqTxt" data-i18n-exempt></div>
-      <div class="row">
-        <button class="btn brand" id="faqSolved">${esc(T("faq.solved"))}</button>
-        <button class="btn" id="faqHelp">${esc(T("faq.needHelp"))}</button>
-        <button class="btn" id="faqPlay" hidden>▶ ${esc(T("play.play"))}</button>
-      </div>
-    </div>`;
-  $("faqTxt").textContent = answer;
-
-  $("faqSolved").onclick = async () => {
-    $("faqSolved").disabled = true;
-    try{
-      await fetch("/api/portal/faq/" + encodeURIComponent(id) + "/solved", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({answer}),
-      });
-    }catch(e){}
-    SC.stop();
-    $("faqOut").innerHTML =
-      `<div class="answer"><div class="k">${esc(T("faq.sorted"))}</div>
-       <div class="txt">${esc(T("faq.gladThatHelped"))}</div></div>`;
-    load();
-  };
-
-  $("faqHelp").onclick = () => {
-    SC.stop();
-    openModal({category: faq.category, subject: faq.english || faq.label});
-  };
-
-  const play = $("faqPlay");
-  if(SC.canSpeak){
-    play.hidden = !SC.voiceOn;
-    play.onclick = () => {
-      if(play.dataset.on === "1"){ SC.stop(); return; }
-      SC.speak(answer, SC.language,
-               () => { play.dataset.on = "1"; play.textContent = "■ " + T("play.stop"); },
-               () => { play.dataset.on = "";  play.textContent = "▶ " + T("play.play"); });
-    };
-  }
-}
+$("faqMore").onclick = () => { FAQ_OPEN = !FAQ_OPEN; paintFaqs(); };
 
 /* ---------------- language + voice ---------------- */
 
@@ -636,8 +630,6 @@ const descMic = SC.attachMic($("descMic"), $("description"), {
 });
 SC.onVoiceChange(on => {
   on ? descMic.enable() : descMic.disable();
-  const p = $("faqPlay");
-  if(p) p.hidden = !on;
 });
 
 /* Every switch runs this, twice: once immediately from the seed or the
@@ -651,7 +643,7 @@ SC.mountPicker($("langPick"), () => {
   if($("descMic") && !$("descMic").disabled){
     $("descMic").title = T("voice.speakInstead");
   }
-  loadFaqs();                             // the six labels are server-side data
+  loadFaqs();                             // the tag labels are server-side data
 });
 </script>
 </body>

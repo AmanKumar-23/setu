@@ -42,11 +42,15 @@
   /* A catalogue we have already paid for, kept per browser so a second visit
      in the same language repaints with no round trip at all. */
   function cached(code) {
-    try { return JSON.parse(SC.get("sc.strings." + code, "null")); }
+    try { return JSON.parse(SC.get(cacheKey(code), "null")); }
     catch (e) { return null; }
   }
   function remember(code, table) {
-    try { SC.set("sc.strings." + code, JSON.stringify(table)); } catch (e) {}
+    try { SC.set(cacheKey(code), JSON.stringify(table)); } catch (e) {}
+  }
+  // Versioned, so a catalogue cached before the English changed is ignored.
+  function cacheKey(code) {
+    return "sc.strings." + (SC.CATALOGUE || "1") + "." + code;
   }
 
   SC.mountPicker = function (select, onChange) {
