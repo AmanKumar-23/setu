@@ -47,5 +47,8 @@ ignore = [
 "tests/*" = ["S101", "SIM117"]
 
 [tool.pytest.ini_options]
+markers = [
+    "live_api: reaches the real Gemini API; runs only with GEMINI_API_KEY set",
+]
 testpaths = ["tests"]
 addopts = "-q"

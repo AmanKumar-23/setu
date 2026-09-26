@@ -4,10 +4,16 @@ import os
 
 import pytest
 
-needs_key = pytest.mark.skipif(
-    not os.getenv("GEMINI_API_KEY"),
-    reason="semantic search calls the embeddings API; keyword path is covered below",
-)
+
+def needs_key(test):
+    """Opt in to the real embeddings API. Everything else in the suite is
+    blocked from the network by conftest.no_network; these two are the only
+    tests that mean to reach it, and only with GEMINI_API_KEY set."""
+    test = pytest.mark.live_api(test)
+    return pytest.mark.skipif(
+        not os.getenv("GEMINI_API_KEY"),
+        reason="semantic search calls the embeddings API; keyword path is covered below",
+    )(test)
 
 
 @pytest.mark.parametrize("message,topic", [
