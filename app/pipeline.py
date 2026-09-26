@@ -112,42 +112,68 @@ def try_auto_resolve(sess, text, language="en"):
 # --------------------------------------------------------------------------
 # The turn
 # --------------------------------------------------------------------------
-def run_customer_turn(sess, text, *, channel="typed", language=None):
-    """Analyse, look up, then either answer outright or draft for an agent.
+def record_customer_message(sess, text, *, channel="typed"):
+    """The part of a turn the customer actually waits for. No model calls.
+
+    Saves their message and marks the case as waiting on the assistant. The
+    request that called this can answer in milliseconds; everything the model
+    does happens afterwards, in respond_to_customer().
+    """
+    sess.state.add_message("customer", text, channel=channel)
+    sess.last_customer_message = text
+    # NOT the knowledge-gap check. It sounds like bookkeeping but it runs an
+    # embedding search -- 0.5s warm, 1.8s cold -- and it was the last model
+    # call left holding the request up. It runs first thing in the worker.
+    sess.ai_pending = True
+    # Also gives a new case its id, before any model call is billed to it.
+    sess.persist(reopen=True)
+
+
+def _persist(sess, **kwargs):
+    sess.persist(**kwargs)
+
+
+def respond_to_customer(sess, text, *, language=None, commit=_persist):
+    """Everything the model does for one customer message.
+
+    Analyse, look up, then either answer outright or draft for an agent.
+    `commit(sess, **persist_kwargs)` does the final save; the background
+    worker passes one that re-reads the case first, so a message the customer
+    sent while this was running is kept rather than overwritten.
 
     `language` is the language the REPLY is written in. It reaches
     suggest_reply and nothing else: analyse, lookup and score stay in English
     however the customer writes, because the dashboard, the work queue and
     the knowledge grouping all read one vocabulary.
 
-    Raises whatever the model raised if the ANALYSE step fails -- the caller
-    turns that into an HTTP error. Every later step is best-effort: a failed
-    lookup or a failed draft must not cost the turn its analysis.
+    Raises whatever the model raised if the ANALYSE step fails. Every later
+    step is best-effort: a failed lookup or a failed draft must not cost the
+    turn its analysis.
     """
     language = languages.normalise(language or getattr(sess, "language", None))
     sess.language = language
-    sess.state.add_message("customer", text, channel=channel)
-    sess.last_customer_message = text
+    timings = {}
 
-    # Logged before the model is called: whether we can answer this has
-    # nothing to do with whether the analysis succeeds.
-    if is_knowledge_gap(text):
-        sess.unanswered.append({"text": text, "at": _now_iso()})
+    def timed(step, fn, *args, **kwargs):
+        began = time.perf_counter()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            timings[step] = int((time.perf_counter() - began) * 1000)
 
-    # The case needs its id BEFORE the first model call, or the opening turn
-    # of every conversation is billed against no case at all.
-    if sess.case_id is None:
-        sess.persist()
-
-    started = time.perf_counter()
+    # Logged before the analysis: whether we can answer this has nothing to
+    # do with whether the analysis succeeds.
     try:
-        # The whole conversation, so the model judges the trajectory rather
-        # than one isolated sentence.
-        analysis = sess.coach.analyze_customer_message(text, sess.state.history)
+        if timed("gap", is_knowledge_gap, text):
+            sess.unanswered.append({"text": text, "at": _now_iso()})
     except Exception:
-        sess.persist()            # keep the case even if the model failed
-        raise
-    elapsed = int((time.perf_counter() - started) * 1000)
+        pass                     # a failed search must not cost the turn
+
+    # The whole conversation, so the model judges the trajectory rather
+    # than one isolated sentence.
+    analysis = timed("analyse", sess.coach.analyze_customer_message,
+                     text, sess.state.history)
+    elapsed = timings["analyse"]
 
     state = sess.state
     state.sentiment = analysis.get("sentiment", "unknown")
@@ -167,8 +193,8 @@ def run_customer_turn(sess, text, *, channel="typed", language=None):
     # Look up now rather than waiting for the agent to reply, so the facts are
     # on screen while they are still typing.
     try:
-        sess.facts = sess.coach.gather_facts(
-            text, state.history, allow_writes=sess.allow_writes)
+        sess.facts = timed("lookup", sess.coach.gather_facts,
+                           text, state.history, allow_writes=sess.allow_writes)
     except Exception:
         sess.facts = []          # a failed lookup must not lose the turn
 
@@ -185,9 +211,12 @@ def run_customer_turn(sess, text, *, channel="typed", language=None):
 
     sess.auto_reply = None
     try:
-        auto = try_auto_resolve(sess, text, language)
+        auto = timed("decide", try_auto_resolve, sess, text, language)
     except Exception:
         auto = None              # never let this break an ordinary turn
+
+    sess.ai_pending = False
+    sess.last_timings = timings
 
     if auto:
         sess.auto_reply = auto
@@ -198,13 +227,14 @@ def run_customer_turn(sess, text, *, channel="typed", language=None):
         sess.last_suggestion = auto["reply"]
         if sess.first_response_at is None:
             sess.first_response_at = _now_iso()
-        sess.persist(status="auto_resolved", closed_at=_now_iso())
+        commit(sess, status="auto_resolved", closed_at=_now_iso())
     else:
         # Draft NOW, on the customer's turn. Waiting until the agent has
         # typed something is backwards: by then they have done the work the
         # draft was meant to save.
         try:
-            sess.last_suggestion = sess.coach.suggest_reply(
+            sess.last_suggestion = timed(
+                "draft", sess.coach.suggest_reply,
                 text, state.history,
                 analysis={"sentiment": state.sentiment,
                           "urgency": state.urgency,
@@ -220,7 +250,19 @@ def run_customer_turn(sess, text, *, channel="typed", language=None):
             # A failed draft must not cost the analysis or the lookups.
             sess.last_suggestion = ""
 
-        sess.persist(reopen=True)
+        commit(sess, reopen=True)
 
-    return TurnResult(analysis, elapsed, sess.facts,
-                      sess.auto_reply, sess.last_suggestion)
+    result = TurnResult(analysis, elapsed, sess.facts,
+                        sess.auto_reply, sess.last_suggestion)
+    result.timings = timings
+    return result
+
+
+def run_customer_turn(sess, text, *, channel="typed", language=None):
+    """Record and respond in one go -- the console's synchronous path.
+
+    The portal does NOT use this: it records in the request and responds in
+    the background, so a customer never waits on the model.
+    """
+    record_customer_message(sess, text, channel=channel)
+    return respond_to_customer(sess, text, language=language)

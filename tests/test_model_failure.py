@@ -153,7 +153,8 @@ def test_the_ticket_is_created_even_when_the_model_is_down(srv, client):
     assert reply.status_code == 200
     body = reply.get_json()
     assert body["ok"] is True
-    assert body["notice"] == "assistant_unavailable"
+    # The request no longer waits on the model at all, so it cannot know the
+    # model failed; the note in the thread is how the customer finds out.
     stored = next(c for c in srv.load_cases() if c["id"] == body["ticket"]["id"])
     assert stored["messages"][0]["text"] == "my recharge failed and money was deducted"
 

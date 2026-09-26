@@ -129,6 +129,7 @@
     "cat.Billing & Payments": "Billing & Payments",
     "cat.App & Technical": "App & Technical",
     "note.assistantBusy": "Thanks — we have your message. Our assistant is taking longer than usual, so a member of our team will reply here shortly.",
+    "chat.typing": "Setu is typing…",
   };
 
   /* Hindi, written by hand rather than bought from the model, so the two
@@ -238,6 +239,7 @@
     "cat.Billing & Payments": "बिलिंग और भुगतान",
     "cat.App & Technical": "ऐप और तकनीकी",
     "note.assistantBusy": "धन्यवाद — आपका संदेश हमें मिल गया है। हमारा सहायक अभी सामान्य से ज़्यादा समय ले रहा है, इसलिए हमारी टीम का कोई सदस्य जल्द ही यहीं जवाब देगा।",
+    "chat.typing": "सेतु लिख रहा है…",
   };
 
   /* Bumped whenever the English changes, so a browser that cached a

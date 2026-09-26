@@ -27,7 +27,9 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 
@@ -693,6 +695,12 @@ def may_see_case(case):
 # ==========================================================================
 # The conversation currently open
 # ==========================================================================
+# One writer at a time for the case store. Every persist() is a few
+# milliseconds of read-modify-write, so serialising them costs nothing and
+# stops two of them allocating the same case id.
+STORE_LOCK = threading.RLock()
+
+
 class LiveSession:
     """The one conversation an agent is working on right now.
 
@@ -719,6 +727,12 @@ class LiveSession:
         # cases have no value, which reads as "human" -- they were all worked
         # by people, and nothing already in the queue may vanish from it.
         self.handler = ""
+        # True from the moment a customer message is saved until the
+        # assistant has answered it. The chat shows "typing" while it is set.
+        self.ai_pending = False
+        # How long each model step took on the last turn, in ms. Kept on the
+        # case so a slow week can be found later, not just in a rotated log.
+        self.last_timings = {}
         # The language the REPLY is written in. Analysis stays English.
         self.language = DEFAULT_LANGUAGE
         self.opened_at = None
@@ -774,6 +788,8 @@ class LiveSession:
             "category": self.category,
             "origin": self.origin,
             "handler": self.handler,
+            "ai_pending": self.ai_pending,
+            "perf": self.last_timings,
             "language": self.language,
             "opened_at": self.opened_at,
             "first_response_at": self.first_response_at,
@@ -827,6 +843,13 @@ class LiveSession:
         pending -- saving the case for any other reason (a reset, an agent
         reply) must not quietly undo a deflection.
         """
+        # Serialised. Case ids are allocated by reading the store, so two
+        # tickets raised at the same moment -- more likely now the AI runs on
+        # worker threads -- could otherwise both be handed SC-2014.
+        with STORE_LOCK:
+            return self._persist(status, closed_at, reopen)
+
+    def _persist(self, status, closed_at, reopen):
         cases = load_cases()
 
         if self.case_id is None:
@@ -893,6 +916,8 @@ class LiveSession:
         self.category = case.get("category") or ""
         self.origin = case.get("origin") or ""
         self.handler = case.get("handler") or ""
+        self.ai_pending = bool(case.get("ai_pending"))
+        self.last_timings = dict(case.get("perf") or {})
         self.language = case.get("language") or DEFAULT_LANGUAGE
         self.opened_at = case.get("opened_at")
         self.first_response_at = case.get("first_response_at")
@@ -1242,6 +1267,16 @@ SOFT_ERRORS = {
 
 log = logging.getLogger("setu")
 
+# Without a handler these loggers write nowhere, and the timings Issue 4 asked
+# for would be computed and thrown away. One line per event, to the console
+# the server already prints its banner to.
+if not logging.getLogger("setu").handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s  %(message)s", "%H:%M:%S"))
+    logging.getLogger("setu").addHandler(_handler)
+    logging.getLogger("setu").setLevel(logging.INFO)
+
 
 def failure(error, status=502):
     """A failed request: logged in full, answered softly.
@@ -1505,6 +1540,12 @@ def customer_status_of(case):
         return "ai_handled"
     if status == "resolved":
         return "resolved"
+    # Open, and the assistant is on it -- either writing a reply right now, or
+    # the one handling this conversation. Saying "a human is reviewing" while
+    # no human has been asked would be a promise nobody is keeping.
+    if case.get("handler") != "human" and (case.get("ai_pending")
+                                           or case.get("handler") == "ai"):
+        return "ai_handled"
     return "human_reviewing"        # pending, escalated, anything open
 
 
@@ -1534,6 +1575,9 @@ def as_customer_case(case, *, with_messages=False):
         "can_rate": case.get("status") in CLOSED,
         "rating_editable": rating_still_open(case),
         "language": case.get("language") or DEFAULT_LANGUAGE,
+        # "We are writing you a reply" -- the chat shows it as typing and
+        # checks back. Says nothing about how the message was judged.
+        "ai_pending": bool(case.get("ai_pending")),
     }
 
     if with_messages:
@@ -1643,7 +1687,7 @@ def portal_tickets():
                     "tickets": [as_customer_case(c) for c in cases_for_customer(me)]})
 
 
-def hand_to_a_person(sess, language, why):
+def hand_to_a_person(sess, language, why, commit=None):
     """The model could not answer. Keep the ticket and tell the customer so.
 
     The message they wrote is already saved -- run_customer_turn persists the
@@ -1653,10 +1697,137 @@ def hand_to_a_person(sess, language, why):
     """
     note = ui_strings_cached(language).get(
         "note.assistantBusy", UI_STRINGS["note.assistantBusy"])
-    sess.state.add_message("agent", note, source=SYSTEM_SOURCE)
+    # Once is enough. Every later message on a case the model cannot reach
+    # would otherwise repeat the same apology underneath it.
+    said = [m for m in sess.state.history if m.speaker != "customer"]
+    if not (said and said[-1].source == SYSTEM_SOURCE and said[-1].text == note):
+        sess.state.add_message("agent", note, source=SYSTEM_SOURCE)
     sess.handler = "human"
-    sess.persist(reopen=True)
+    sess.ai_pending = False
+    (commit or (lambda s, **kw: s.persist(**kw)))(sess, reopen=True)
     log.warning("case %s handed to a person: %s", sess.case_id, why)
+
+
+# ---------------------------------------------------------------------------
+# The assistant, off the request
+#
+# A customer's message is saved in the request, which then answers in
+# milliseconds. The model work -- analyse, look up, decide, draft, about 7s
+# on a good day -- happens here, on a worker thread, and the chat page polls
+# until the reply lands.
+#
+# Two writers can touch one case at once: the customer sending again while
+# the assistant is still answering the last message. So each case has a
+# lock, held only for the read at the start and the write at the end -- never
+# across a model call -- and the write re-reads the case and keeps anything
+# that arrived meanwhile. If something did arrive, the worker goes round
+# again, so the newest message is always the one answered.
+# ---------------------------------------------------------------------------
+AI_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="setu-ai")
+AI_BUSY = set()                  # case ids with a worker in flight
+_CASE_LOCKS = {}
+_CASE_LOCKS_GUARD = threading.Lock()
+
+
+def case_lock(case_id):
+    with _CASE_LOCKS_GUARD:
+        return _CASE_LOCKS.setdefault(case_id, threading.RLock())
+
+
+def find_case(case_id):
+    return next((c for c in load_cases() if c.get("id") == case_id), None)
+
+
+def start_assistant(case_id, customer, language):
+    """Run the assistant on this case. The caller has already added the id to
+    AI_BUSY under the case's lock, which is what stops two workers starting."""
+    if app.config.get("AI_INLINE"):
+        # The test suite: run it now, so a test can assert on the reply the
+        # moment the request returns instead of racing a thread.
+        _assistant_job(case_id, customer, language)
+    else:
+        AI_POOL.submit(_assistant_job, case_id, customer, language)
+
+
+def _assistant_job(case_id, customer, language):
+    began_job = time.perf_counter()
+    try:
+        with metering.attribute_to(case_id, customer):
+            while _answer_latest(case_id, language):
+                pass
+    except Exception as error:                # never leave a chat "typing"
+        log.exception("assistant job for %s failed: %s", case_id, error)
+        with case_lock(case_id):
+            AI_BUSY.discard(case_id)
+            case = find_case(case_id)
+            if case is not None and case.get("ai_pending"):
+                sess = scoped_session_for(case)
+                hand_to_a_person(sess, language, f"worker crashed: {error!r}")
+    finally:
+        log.info("assistant finished %s in %.1fs", case_id,
+                 time.perf_counter() - began_job)
+
+
+def _answer_latest(case_id, language):
+    """Answer the newest customer message once. True if another arrived while
+    this one was being answered, so the caller should go round again."""
+    with case_lock(case_id):
+        case = find_case(case_id)
+        if case is None:
+            AI_BUSY.discard(case_id)
+            return False
+        sess = scoped_session_for(case)
+        seen = len(case.get("messages", []))
+        text = sess.last_customer_message
+
+    outcome = {"arrived": False}
+
+    def commit(s, **kwargs):
+        with case_lock(case_id):
+            fresh = find_case(case_id) or {}
+            arrived = [m for m in fresh.get("messages", [])[seen:]
+                       if m.get("speaker") == "customer"]
+            for m in arrived:
+                s.state.add_message("customer", m.get("text", ""),
+                                    channel=m.get("channel", "typed"))
+            if arrived:
+                # The customer wrote again while this was being answered.
+                # Keep their message, leave the case open, and go round.
+                s.last_customer_message = arrived[-1].get("text", "")
+                s.ai_pending = True
+                kwargs = {"reopen": True}
+            else:
+                AI_BUSY.discard(case_id)
+            s.persist(**kwargs)
+            outcome["arrived"] = bool(arrived)
+
+    began = time.perf_counter()
+    try:
+        result = pipeline.respond_to_customer(sess, text, language=language,
+                                              commit=commit)
+        log.info("case %s answered in %.1fs %s", case_id,
+                 time.perf_counter() - began, getattr(result, "timings", {}))
+    except Exception as error:
+        hand_to_a_person(sess, language, f"{type(error).__name__}: {error}",
+                         commit=commit)
+    return outcome["arrived"]
+
+
+def resume_waiting_assistants():
+    """After a restart, answer anything that was waiting when it stopped.
+
+    AI_BUSY lives in memory, so a restart mid-reply would otherwise leave
+    that chat showing "typing" for ever.
+    """
+    for case in load_cases():
+        if case.get("ai_pending") and case.get("customer"):
+            case_id = case["id"]
+            with case_lock(case_id):
+                if case_id in AI_BUSY:
+                    continue
+                AI_BUSY.add(case_id)
+            start_assistant(case_id, case["customer"],
+                            case.get("language") or DEFAULT_LANGUAGE)
 
 
 @app.post("/api/portal/tickets")
@@ -1690,21 +1861,20 @@ def portal_new_ticket():
     sess.origin = (f"tag:{tag}" if any(f["id"] == tag for f in FAQS)
                    else "form")
 
-    notice = None
-    try:
-        pipeline.run_customer_turn(
-            sess, description, channel=read_channel(body), language=language)
-    except Exception as error:
-        # The ticket exists either way. What the customer must never see is
-        # the exception.
-        if sess.case_id is None:
-            return failure(error)
-        hand_to_a_person(sess, language, f"{type(error).__name__}: {error}")
-        notice = "assistant_unavailable"
+    # Saved and answered in milliseconds. The assistant runs afterwards, so a
+    # slow or unreachable model can no longer hold the customer's ticket up.
+    began = time.perf_counter()
+    pipeline.record_customer_message(sess, description,
+                                     channel=read_channel(body))
+    with case_lock(sess.case_id):
+        AI_BUSY.add(sess.case_id)
+    start_assistant(sess.case_id, me, language)
+    log.info("ticket %s created in %dms", sess.case_id,
+             (time.perf_counter() - began) * 1000)
 
-    case = next((c for c in load_cases() if c.get("id") == sess.case_id), None)
-    return jsonify({"ok": True, "notice": notice,
-                    "ticket": as_customer_case(case or {}, with_messages=True)})
+    return jsonify({"ok": True,
+                    "ticket": as_customer_case(find_case(sess.case_id) or {},
+                                               with_messages=True)})
 
 
 @app.get("/api/portal/cases/<case_id>")
@@ -1856,6 +2026,7 @@ UI_STRINGS = {
     "cat.Billing & Payments": "Billing & Payments",
     "cat.App & Technical": "App & Technical",
     "note.assistantBusy": "Thanks — we have your message. Our assistant is taking longer than usual, so a member of our team will reply here shortly.",
+    "chat.typing": "Setu is typing…",
 }
 
 # Hindi is written by hand in i18n.js so the author can proofread it, and the
@@ -2142,28 +2313,29 @@ def portal_message(case_id):
     if refused:
         return refused
 
-    sess = scoped_session_for(case)
-    language = getattr(current_user, "preferred_language", None) or sess.language
-    notice = None
-    try:
-        pipeline.run_customer_turn(
-            sess, text, channel=read_channel(request.json or {}),
-            language=language)
-    except Exception as error:
-        hand_to_a_person(sess, language, f"{type(error).__name__}: {error}")
-        notice = "assistant_unavailable"
+    language = getattr(current_user, "preferred_language", None) or DEFAULT_LANGUAGE
+    me = signed_in_username()
 
-    fresh = customer_case_or_none(case_id, signed_in_username())
-    # What they actually wrote in, if it is not what they chose. The page
-    # OFFERS a switch; nothing changes language on its own.
-    detected = languages.detect_language(text)
-    return jsonify({"ok": True, "notice": notice,
-                    "ticket": as_customer_case(fresh or {}, with_messages=True),
-                    "detected": detected if detected and detected != language
-                                else None,
-                    "detected_native": (languages.native_name(detected)
-                                        if detected and detected != language
-                                        else None)})
+    # Record under the case's lock -- re-reading it first, so a reply the
+    # assistant wrote a moment ago is not overwritten -- and answer at once.
+    # If the assistant is already working on this case it will pick this
+    # message up itself; otherwise start it.
+    began = time.perf_counter()
+    with case_lock(case_id):
+        sess = scoped_session_for(find_case(case_id) or case)
+        pipeline.record_customer_message(
+            sess, text, channel=read_channel(request.json or {}))
+        start = case_id not in AI_BUSY
+        if start:
+            AI_BUSY.add(case_id)
+    if start:
+        start_assistant(case_id, me, language)
+    log.info("message on %s saved in %dms", case_id,
+             (time.perf_counter() - began) * 1000)
+
+    fresh = customer_case_or_none(case_id, me)
+    return jsonify({"ok": True,
+                    "ticket": as_customer_case(fresh or {}, with_messages=True)})
 
 
 # ==========================================================================
@@ -3591,6 +3763,8 @@ if __name__ == "__main__":
     # security design -- change it with --passwd, or set DEMO_PASSWORD.
     demo_password = os.getenv("DEMO_PASSWORD", "support-coach-demo")
     demo_made = auth.ensure_demo_users(demo_password)
+    # Anything the assistant was answering when the server last stopped.
+    resume_waiting_assistants()
 
     key_file = coach_core.find_key_file()
     saved = load_cases()

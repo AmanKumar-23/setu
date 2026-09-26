@@ -232,6 +232,15 @@ textarea:focus{border-color:#F0A88F;box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
   vertical-align:-2px;margin-right:7px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .thinking{align-self:flex-start;font-size:12.5px;color:var(--ink-3);padding:4px 2px}
+.typing .bubble{display:flex;align-items:center;gap:9px;color:var(--ink-3);
+  font-size:12.5px}
+.dots{display:inline-flex;gap:4px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--ink-3);display:block;
+  animation:blink 1.2s infinite ease-in-out}
+.dots i:nth-child(2){animation-delay:.18s}
+.dots i:nth-child(3){animation-delay:.36s}
+@keyframes blink{0%,80%,100%{opacity:.25;transform:translateY(0)}
+  40%{opacity:1;transform:translateY(-2px)}}
 
 /* Below 900px the column cap does nothing but waste the screen, so the
    conversation simply takes the width it is given. The gutter stays. */
@@ -392,7 +401,15 @@ function render(t){
   // thing said was the customer's -- i.e. nothing answered them yet.
   const msgs = t.messages || [];
   const last = msgs[msgs.length - 1];
-  if(t.status === "human_reviewing" && last && last.speaker === "customer"){
+  if(t.ai_pending){
+    // The assistant is writing. Say so, where the reply will appear.
+    const typing = document.createElement("div");
+    typing.className = "turn theirs typing";
+    typing.innerHTML = '<div class="bubble"><span class="dots"><i></i><i></i><i></i></span>'
+                     + '<span class="tlabel"></span></div>';
+    typing.querySelector(".tlabel").textContent = T("chat.typing");
+    thread.appendChild(typing);
+  } else if(t.status === "human_reviewing" && last && last.speaker === "customer"){
     const line = document.createElement("div");
     line.className = "sysline";
     line.textContent = T("chat.humanJoining");
@@ -401,6 +418,7 @@ function render(t){
 
   thread.scrollTop = thread.scrollHeight;
   renderRating(t);
+  watchForReply(t);
   renderPlayer(t);
   renderOffer(t);
 }
@@ -563,6 +581,20 @@ async function sendRating(){
   }
 }
 
+/* While the assistant is writing, check back until the reply lands. Quick
+   at first, because a good answer takes a few seconds; then more slowly, so
+   a model having a bad day is not hammered with requests. */
+let watch = null, watchDelay = 900;
+
+function watchForReply(t){
+  clearTimeout(watch);
+  if(!t || !t.ai_pending){ watchDelay = 900; return; }
+  watch = setTimeout(async () => {
+    watchDelay = Math.min(watchDelay * 1.35, 4000);
+    await load();
+  }, watchDelay);
+}
+
 async function load(){
   try{
     const d = await (await fetch("/api/portal/cases/" + CASE_ID)).json();
@@ -586,12 +618,6 @@ async function send(){
   $("sendBtn").innerHTML = '<span class="spin"></span>' + esc(T("chat.sending"));
   $("input").value = "";
   $("input").style.height = "auto";
-
-  const waiting = document.createElement("div");
-  waiting.className = "thinking";
-  waiting.textContent = T("chat.thinking");
-  $("thread").appendChild(waiting);
-  $("thread").scrollTop = $("thread").scrollHeight;
 
   try{
     const d = await (await fetch(`/api/portal/cases/${CASE_ID}/message`, {

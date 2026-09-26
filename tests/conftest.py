@@ -42,6 +42,10 @@ def srv(tmp_path):
     module.CASES_DB = str(tmp_path / "cases.db")
     module.CASES_FILE = str(tmp_path / "cases.json")
     module.init_db()
+    # The portal answers customers on a worker thread. Here it runs inline,
+    # so a test can assert on the reply the moment the request returns
+    # instead of racing a thread. tests/test_async_reply.py turns it off.
+    module.app.config["AI_INLINE"] = True
     return module
 
 
