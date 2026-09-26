@@ -74,6 +74,9 @@ def test_intents_are_exactly_the_agreed_list(core):
     assert core.INTENTS == [
         "Recharge failed", "Refund status", "Order & delivery", "Network issue",
         "Account & login", "Billing dispute", "Cancellation", "Product question",
+        # Added for the chat panel brief, which names "complaint" outright and
+        # needed somewhere for the App & Technical category's tickets to land.
+        "Complaint", "Technical issue",
         "Other",
     ]
 

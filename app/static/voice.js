@@ -28,9 +28,17 @@
   SC.languages = {};          // code -> {native, english, speech}
   SC.language = "en";         // the customer's chosen reply language
 
+  /* Known without asking the server, so a reply can be spoken correctly
+     even before the picker has loaded. Hinglish is Hindi in Latin letters,
+     which an Indian English voice reads far better than a Hindi one. */
+  var SPEECH = { en: "en-IN", hi: "hi-IN", bn: "bn-IN", ta: "ta-IN",
+                 te: "te-IN", mr: "mr-IN", gu: "gu-IN", kn: "kn-IN",
+                 ml: "ml-IN", pa: "pa-IN", hinglish: "en-IN" };
+
   SC.speechCode = function (code) {
-    var row = SC.languages[code || SC.language];
-    return (row && row.speech) || "en-IN";
+    code = code || SC.language;
+    var row = SC.languages[code];
+    return (row && row.speech) || SPEECH[code] || "en-IN";
   };
   SC.nativeName = function (code) {
     var row = SC.languages[code || SC.language];
@@ -269,6 +277,27 @@
     })[0] || null;    // null means "let the browser choose"
   }
 
+  /* Can this device actually SAY something in `code`? speechSynthesis will
+     happily read Tamil text with an English voice, which is worse than no
+     audio at all -- so a language with no matching voice gets a disabled
+     button that says why, not a button that produces nonsense.
+
+     Returns true / false, or null while the browser is still loading its
+     voice list (Chrome fills it in after the page loads). */
+  SC.canSpeakIn = function (code) {
+    if (!SC.canSpeak) return false;
+    var voices = [];
+    try { voices = w.speechSynthesis.getVoices() || []; } catch (e) { return false; }
+    if (!voices.length) return null;
+    var stem = SC.speechCode(code).split("-")[0].toLowerCase();
+    return voices.some(function (v) {
+      return (v.lang || "").toLowerCase().replace("_", "-").indexOf(stem) === 0;
+    });
+  };
+
+  var voiceListeners = [];
+  SC.onVoices = function (fn) { voiceListeners.push(fn); };
+
   SC.stop = function () {
     if (speaking) { var s = speaking; speaking = null; s.done(); }
     try { w.speechSynthesis.cancel(); } catch (e) {}
@@ -300,8 +329,13 @@
 
   // Chrome loads voices asynchronously; nothing to do but let the list refresh.
   if (SC.canSpeak && typeof w.speechSynthesis.addEventListener === "function") {
-    try { w.speechSynthesis.addEventListener("voiceschanged", function () {}); }
-    catch (e) {}
+    // The list arrives late in Chrome; whoever drew a Play button before it
+    // did gets to redraw it now that the answer is known.
+    try {
+      w.speechSynthesis.addEventListener("voiceschanged", function () {
+        voiceListeners.forEach(function (fn) { try { fn(); } catch (e) {} });
+      });
+    } catch (e) {}
   }
   // A page left mid-sentence should not keep talking.
   w.addEventListener("pagehide", function () { SC.stop(); });

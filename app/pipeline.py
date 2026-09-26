@@ -110,6 +110,80 @@ def try_auto_resolve(sess, text, language="en"):
 
 
 # --------------------------------------------------------------------------
+# Severity
+#
+# One four-level scale for the whole app -- low, medium, high, critical --
+# and it measures how BADLY this is going, not how happy the customer is.
+# High and critical are the ones a person has to see. (The brief suggested
+# "low = negative, high = positive" for the chat; on that scale "escalate
+# high" would escalate the happiest customers, so the two had to be one
+# scale, pointing one way.)
+#
+# Computed here from the model's own readings rather than asked of the model
+# as one more word, so every level comes with the rule that produced it and
+# an agent can see WHY a case was escalated, not just that it was.
+# --------------------------------------------------------------------------
+SEVERITY_LEVELS = ("low", "medium", "high", "critical")
+
+# Said outright, these are critical whatever the score: the customer has
+# stopped asking and started threatening.
+THREATS = ("consumer court", "consumer forum", "legal action", "lawyer",
+           "police", "ombudsman", "sue you", "social media", "twitter",
+           "going viral", "fraud complaint", "cyber cell")
+
+
+def severity_of(analysis, text=""):
+    """(level, score, reasons) for one customer message."""
+    score = analysis.get("frustration")
+    try:
+        score = max(0, min(100, int(score)))
+    except (TypeError, ValueError):
+        score = FALLBACK_SCORE.get(analysis.get("escalation_risk"), 35)
+
+    risk = analysis.get("escalation_risk")
+    emotion = analysis.get("emotion")
+    intent = analysis.get("intent")
+    sentiment = analysis.get("sentiment")
+    urgency = analysis.get("urgency")
+    lowered = str(text or "").lower()
+
+    rules = {
+        "critical": [
+            (score >= 85, f"frustration {score}/100"),
+            (any(t in lowered for t in THREATS),
+             "threatens: " + ", ".join(t for t in THREATS if t in lowered)),
+            (emotion == "Angry" and risk == "high", "angry, and high escalation risk"),
+        ],
+        "high": [
+            (score >= 65, f"frustration {score}/100"),
+            (risk == "high", "high escalation risk"),
+            (emotion == "Angry", "angry"),
+            (intent in ("Cancellation", "Complaint"), f"wants: {intent}"),
+            (urgency == "high" and sentiment == "negative", "urgent and unhappy"),
+        ],
+        "medium": [
+            (score >= 35, f"frustration {score}/100"),
+            (sentiment == "negative", "negative"),
+            (emotion in ("Frustrated", "Anxious"), (emotion or "").lower()),
+            (risk == "medium", "some escalation risk"),
+        ],
+    }
+    for level in ("critical", "high", "medium"):
+        reasons = [why for fired, why in rules[level] if fired]
+        if reasons:
+            return level, score, reasons
+    return "low", score, ["calm; nothing urgent"]
+
+
+# Intents that need a person to DO something the assistant cannot: cancel an
+# account, reverse a disputed charge. Customers are never given the write
+# tools, so the assistant could only promise these -- and "no write action
+# ever executes automatically" means it must not. A refund STATUS is a
+# lookup, and stays with the assistant.
+NEEDS_A_PERSON = ("Cancellation", "Billing dispute")
+
+
+# --------------------------------------------------------------------------
 # The turn
 # --------------------------------------------------------------------------
 def record_customer_message(sess, text, *, channel="typed"):
@@ -136,22 +210,29 @@ def _persist(sess, **kwargs):
 def respond_to_customer(sess, text, *, language=None, commit=_persist):
     """Everything the model does for one customer message.
 
-    Analyse, look up, then either answer outright or draft for an agent.
+    Analyse, look up, decide, and -- on a case the assistant is handling --
+    answer the customer directly, in the language they just wrote in.
     `commit(sess, **persist_kwargs)` does the final save; the background
     worker passes one that re-reads the case first, so a message the customer
     sent while this was running is kept rather than overwritten.
 
-    `language` is the language the REPLY is written in. It reaches
-    suggest_reply and nothing else: analyse, lookup and score stay in English
-    however the customer writes, because the dashboard, the work queue and
-    the knowledge grouping all read one vocabulary.
+    `language` is the customer's CHOSEN language, the fallback for a message
+    that gives nothing to detect ("ok", "499"). The reply language itself is
+    detected from THIS message, so a customer who switches mid-conversation
+    is answered in whatever they just used.
+
+    Analysis, lookups and scoring stay in English however the customer
+    writes: the dashboard, the work queue and the knowledge grouping all read
+    one vocabulary. Only the reply is in the customer's language.
 
     Raises whatever the model raised if the ANALYSE step fails. Every later
     step is best-effort: a failed lookup or a failed draft must not cost the
     turn its analysis.
     """
-    language = languages.normalise(language or getattr(sess, "language", None))
-    sess.language = language
+    preferred = languages.normalise(language) if language else None
+    reply_lang, how = languages.reply_language(
+        text, previous=getattr(sess, "language", None), preferred=preferred)
+    sess.language = reply_lang
     timings = {}
 
     def timed(step, fn, *args, **kwargs):
@@ -190,6 +271,26 @@ def respond_to_customer(sess, text, *, language=None, commit=_persist):
     note_redactions(sess)
     sess.trajectory.append(state.frustration)
 
+    level, score, reasons = severity_of(analysis, text)
+    sess.severity = {"level": level, "score": score, "reasons": reasons}
+
+    # The reading belongs to THIS message as well as to the case, so the
+    # history can be read back turn by turn -- and so a later, calmer message
+    # does not erase the record of the one that was not.
+    reading = {
+        "severity": level, "severity_score": score, "severity_reasons": reasons,
+        "sentiment": state.sentiment, "urgency": state.urgency,
+        "intent": state.intent, "intent_confidence": state.intent_confidence,
+        "emotion": state.emotion, "language": reply_lang, "language_how": how,
+    }
+    for message in reversed(state.history):
+        if message.speaker == "customer" and message.text == text:
+            message.analysis = reading
+            detected = languages.detect_message_language(text)
+            message.language = (reply_lang if detected == "devanagari"
+                                else detected or "")
+            break
+
     # Look up now rather than waiting for the agent to reply, so the facts are
     # on screen while they are still typing.
     try:
@@ -209,53 +310,87 @@ def respond_to_customer(sess, text, *, language=None, commit=_persist):
             # failure on a safety path is its own bug.
             print(f"  AUDIT: could not record proposals: {error}")
 
-    sess.auto_reply = None
-    try:
-        auto = timed("decide", try_auto_resolve, sess, text, language)
-    except Exception:
-        auto = None              # never let this break an ordinary turn
+    for_the_model = {"sentiment": state.sentiment, "urgency": state.urgency,
+                     "key_issue": state.key_issue, "emotion": state.emotion,
+                     "intent": state.intent,
+                     "intent_confidence": state.intent_confidence,
+                     "severity": level}
+    note = languages.reply_instruction(reply_lang)
 
+    sess.auto_reply = None
     sess.ai_pending = False
     sess.last_timings = timings
 
+    # ---- who answers ----
+    # The assistant speaks to the customer only on a case it is handling. A
+    # case a person has taken -- or an older one, from before the assistant
+    # answered anyone -- gets a draft for that person instead.
+    why_a_person = handover_reason(sess, analysis)
+    if sess.handler == "ai" and why_a_person:
+        sess.handler = "human"
+        sess.handover = {"at": _now_iso(), "why": why_a_person,
+                         "severity": level}
+    assistant_answers = sess.handler == "ai"
+
+    auto = None
+    if assistant_answers:
+        try:
+            auto = timed("decide", try_auto_resolve, sess, text, reply_lang)
+        except Exception:
+            auto = None          # never let this break an ordinary turn
+
     if auto:
+        # A help article matched strongly on a calm conversation: answered,
+        # and closed, as before.
         sess.auto_reply = auto
-        # A real reply, so it goes in the transcript and stops the
-        # first-response clock. Answering instantly is rather the point.
-        state.add_message("agent", auto["reply"], source="ai")
+        state.add_message("agent", auto["reply"], source="ai",
+                          language=reply_lang)
         open_rating_slot(sess, True, auto.get("topic"))
         sess.last_suggestion = auto["reply"]
         if sess.first_response_at is None:
             sess.first_response_at = _now_iso()
         commit(sess, status="auto_resolved", closed_at=_now_iso())
     else:
-        # Draft NOW, on the customer's turn. Waiting until the agent has
-        # typed something is backwards: by then they have done the work the
-        # draft was meant to save.
         try:
-            sess.last_suggestion = timed(
-                "draft", sess.coach.suggest_reply,
-                text, state.history,
-                analysis={"sentiment": state.sentiment,
-                          "urgency": state.urgency,
-                          "key_issue": state.key_issue},
-                facts=sess.facts,
-                language_note=languages.reply_instruction(language),
-            )
+            reply = timed("reply", sess.coach.suggest_reply,
+                          text, state.history, analysis=for_the_model,
+                          facts=sess.facts, language_note=note)
             note_redactions(sess)
             article = getattr(sess.coach, "last_article", None)
             open_rating_slot(sess, article is not None,
                              article.get("topic") if article else None)
         except Exception:
-            # A failed draft must not cost the analysis or the lookups.
-            sess.last_suggestion = ""
+            reply = ""           # a failed draft must not cost the analysis
 
+        sess.last_suggestion = reply
+        if assistant_answers and reply:
+            # The assistant's answer, sent. It stays open: a reply is not a
+            # resolution, and the customer may well write back.
+            state.add_message("agent", reply, source="ai", language=reply_lang)
+            if sess.first_response_at is None:
+                sess.first_response_at = _now_iso()
         commit(sess, reopen=True)
 
     result = TurnResult(analysis, elapsed, sess.facts,
                         sess.auto_reply, sess.last_suggestion)
     result.timings = timings
+    result.severity = sess.severity
+    result.reply_language = reply_lang
     return result
+
+
+def handover_reason(sess, analysis):
+    """Why a person has to take this case, or "" if the assistant can.
+
+    The standing rule: nothing that moves money or closes an account happens
+    without a person. The assistant has no write tools on a customer's turn,
+    so all it could do with one of these is promise it -- which it must not.
+    """
+    if any(f.get("proposed") for f in (sess.facts or [])):
+        return "a write action was proposed"
+    if analysis.get("intent") in NEEDS_A_PERSON:
+        return f"{analysis['intent']} needs a person"
+    return ""
 
 
 def run_customer_turn(sess, text, *, channel="typed", language=None):

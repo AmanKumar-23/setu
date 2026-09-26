@@ -105,7 +105,7 @@
     "play.play": "Play",
     "play.stop": "Stop",
     "player.playLatest": "Play latest reply",
-    "offer.question": "Reply in {lang} instead?",
+    "offer.question": "Show Setu in {lang}?",
     "offer.yes": "Yes, switch",
     "offer.no": "No, keep {lang}",
 
@@ -130,6 +130,7 @@
     "cat.App & Technical": "App & Technical",
     "note.assistantBusy": "Thanks — we have your message. Our assistant is taking longer than usual, so a member of our team will reply here shortly.",
     "chat.typing": "Setu is typing…",
+    "play.noVoice": "This device has no {lang} voice to read this aloud",
   };
 
   /* Hindi, written by hand rather than bought from the model, so the two
@@ -216,7 +217,7 @@
     "play.play": "सुनें",
     "play.stop": "रोकें",
     "player.playLatest": "नया जवाब सुनें",
-    "offer.question": "क्या {lang} में जवाब दें?",
+    "offer.question": "सेतु को {lang} में दिखाएँ?",
     "offer.yes": "हाँ, बदलें",
     "offer.no": "नहीं, {lang} ही रखें",
 
@@ -240,11 +241,12 @@
     "cat.App & Technical": "ऐप और तकनीकी",
     "note.assistantBusy": "धन्यवाद — आपका संदेश हमें मिल गया है। हमारा सहायक अभी सामान्य से ज़्यादा समय ले रहा है, इसलिए हमारी टीम का कोई सदस्य जल्द ही यहीं जवाब देगा।",
     "chat.typing": "सेतु लिख रहा है…",
+    "play.noVoice": "इस डिवाइस पर {lang} आवाज़ नहीं है, इसलिए इसे पढ़कर नहीं सुनाया जा सकता",
   };
 
   /* Bumped whenever the English changes, so a browser that cached a
      translation of the old words fetches the new ones. */
-  SC.CATALOGUE = "2";
+  SC.CATALOGUE = "3";
 
   SC.EN = EN;
   SC.strings = EN;

@@ -733,6 +733,10 @@ class LiveSession:
         # How long each model step took on the last turn, in ms. Kept on the
         # case so a slow week can be found later, not just in a rotated log.
         self.last_timings = {}
+        # The latest message's severity: {"level", "score", "reasons"}.
+        self.severity = {}
+        # When and why the assistant handed this case to a person.
+        self.handover = None
         # The language the REPLY is written in. Analysis stays English.
         self.language = DEFAULT_LANGUAGE
         self.opened_at = None
@@ -790,6 +794,10 @@ class LiveSession:
             "handler": self.handler,
             "ai_pending": self.ai_pending,
             "perf": self.last_timings,
+            "severity": (self.severity or {}).get("level"),
+            "severity_score": (self.severity or {}).get("score"),
+            "severity_reasons": (self.severity or {}).get("reasons") or [],
+            "handover": self.handover,
             "language": self.language,
             "opened_at": self.opened_at,
             "first_response_at": self.first_response_at,
@@ -825,7 +833,11 @@ class LiveSession:
                  # Carried through the save so a case that is opened, worked
                  # on and saved again does not throw away a translation we
                  # have already paid for.
-                 "gloss_en": getattr(m, "gloss_en", "")}
+                 "gloss_en": getattr(m, "gloss_en", ""),
+                 # Per message: the language it is in, and -- for a
+                 # customer's -- what the analysis read in it.
+                 "language": getattr(m, "language", ""),
+                 "analysis": getattr(m, "analysis", {}) or {}}
                 for m in self.state.history
             ],
         }
@@ -918,6 +930,11 @@ class LiveSession:
         self.handler = case.get("handler") or ""
         self.ai_pending = bool(case.get("ai_pending"))
         self.last_timings = dict(case.get("perf") or {})
+        self.severity = ({"level": case.get("severity"),
+                          "score": case.get("severity_score"),
+                          "reasons": case.get("severity_reasons") or []}
+                         if case.get("severity") else {})
+        self.handover = case.get("handover")
         self.language = case.get("language") or DEFAULT_LANGUAGE
         self.opened_at = case.get("opened_at")
         self.first_response_at = case.get("first_response_at")
@@ -935,7 +952,9 @@ class LiveSession:
                                    message.get("source", "human"),
                                    message.get("channel", "typed"),
                                    message.get("author", ""),
-                                   message.get("gloss_en", ""))
+                                   message.get("gloss_en", ""),
+                                   message.get("language", ""),
+                                   message.get("analysis") or {})
 
         # The agent replies to the last thing the CUSTOMER said, which is not
         # necessarily the last line of the transcript.
@@ -968,7 +987,10 @@ class LiveSession:
                  # non-English customer text the agent may need glossed
                  "foreign": (m.speaker == "customer"
                              and languages.detect_language(m.text)
-                             not in (None, "en"))}
+                             not in (None, "en")),
+                 # For the agent only -- the customer serialiser never names it.
+                 "language": getattr(m, "language", ""),
+                 "analysis": getattr(m, "analysis", {}) or {}}
                 for m in self.state.history
             ],
             "sentiment": self.state.sentiment,
@@ -1603,15 +1625,8 @@ def as_customer_case(case, *, with_messages=False):
             }
             for m in case.get("messages", [])
         ]
-        # What they are actually writing in, when it is not what they chose.
-        # The page OFFERS a switch and waits; nothing here changes the
-        # language on its own, and nothing is re-translated retrospectively.
-        first = next((m.get("text", "") for m in case.get("messages", [])
-                      if m.get("speaker") == "customer"), "")
-        spotted = languages.detect_language(first)
-        differs = bool(spotted) and spotted != out["language"]
-        out["detected"] = spotted if differs else None
-        out["detected_native"] = languages.native_name(spotted) if differs else None
+        # (Each message carries its own `language`; the chat page reads that
+        # to offer the interface in the language the customer is writing in.)
     return out
 
 
@@ -1860,6 +1875,9 @@ def portal_new_ticket():
     tag = body.get("tag")
     sess.origin = (f"tag:{tag}" if any(f["id"] == tag for f in FAQS)
                    else "form")
+    # The assistant takes a new ticket first, and hands it to a person when it
+    # should. Older cases have no handler and stay with people.
+    sess.handler = "ai"
 
     # Saved and answered in milliseconds. The assistant runs afterwards, so a
     # slow or unreachable model can no longer hold the customer's ticket up.
@@ -2004,7 +2022,7 @@ UI_STRINGS = {
     "play.play": "Play",
     "play.stop": "Stop",
     "player.playLatest": "Play latest reply",
-    "offer.question": "Reply in {lang} instead?",
+    "offer.question": "Show Setu in {lang}?",
     "offer.yes": "Yes, switch",
     "offer.no": "No, keep {lang}",
     "rate.title": "Was your issue resolved?",
@@ -2027,6 +2045,7 @@ UI_STRINGS = {
     "cat.App & Technical": "App & Technical",
     "note.assistantBusy": "Thanks — we have your message. Our assistant is taking longer than usual, so a member of our team will reply here shortly.",
     "chat.typing": "Setu is typing…",
+    "play.noVoice": "This device has no {lang} voice to read this aloud",
 }
 
 # Hindi is written by hand in i18n.js so the author can proofread it, and the

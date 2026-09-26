@@ -435,6 +435,8 @@ function playButton(text, lang){
   b.textContent = "\u25B6 " + T("play.play");
   b.hidden = !(SC.canSpeak && SC.voiceOn);
   b.dataset.play = "1";
+  b.dataset.lang = lang || "";
+  paintVoiceState(b, lang);
   b.onclick = () => {
     if(b.dataset.on === "1"){ SC.stop(); return; }
     SC.speak(text, lang,
@@ -443,6 +445,24 @@ function playButton(text, lang){
   };
   return b;
 }
+
+/* No voice for this language on this device: the button stays, disabled,
+   and says why. Hiding it would look like the reply simply has no audio. */
+function paintVoiceState(button, lang){
+  const ok = SC.canSpeakIn(lang);
+  button.disabled = ok === false;
+  button.title = ok === false ? T("play.noVoice", {lang: langName(lang)}) : "";
+}
+
+function langName(code){
+  return code === "hinglish" ? "Hinglish" : SC.nativeName(code);
+}
+
+// Chrome delivers its voice list after the page has drawn. Re-check then.
+SC.onVoices(() => {
+  document.querySelectorAll("[data-play]").forEach(b => paintVoiceState(b, b.dataset.lang));
+  if(latest) paintVoiceState($("playerBtn"), latest.language);
+});
 
 let latest = null;              // {text, language} -- what the bar plays
 
@@ -456,7 +476,8 @@ function renderPlayer(t){
     $("playerBtn").textContent = "\u25B6 " + T("player.playLatest");
   }
   $("playerWhat").textContent = latest.text;
-  $("playerLang").textContent = SC.nativeName(latest.language);
+  $("playerLang").textContent = langName(latest.language);
+  paintVoiceState($("playerBtn"), latest.language);
 }
 
 $("playerBtn").onclick = () => {
@@ -473,24 +494,32 @@ $("playerBtn").onclick = () => {
    language we are ANSWERING in. Accepting changes the language from here on;
    nothing already sent is rewritten, and nothing switches on its own. */
 
-function offerKey(){ return "sc.langoffer." + CASE_ID; }
+function offerKey(lang){ return "sc.uioffer." + lang; }
 
+/* The reply already follows whatever language the customer writes in, so
+   nothing about the ANSWER needs offering. What is worth offering is the
+   interface: if they are writing in Tamil and the buttons are in English,
+   ask -- once per language -- whether to show Setu in Tamil. Never switched
+   without asking. */
 function renderOffer(t){
   const box = $("offer");
-  if(!t.detected || SC.get(offerKey(), "") === t.detected){
+  const mine = (t.messages || []).filter(m => m.speaker === "customer");
+  const wrote = mine.length ? mine[mine.length - 1].language : "";
+  const offerable = wrote && SC.languages[wrote] && wrote !== SC.language;
+  if(!offerable || SC.get(offerKey(wrote), "") === "asked"){
     box.hidden = true;
     return;
   }
   box.hidden = false;
-  $("offerQ").textContent = T("offer.question", {lang: t.detected_native});
+  $("offerQ").textContent = T("offer.question", {lang: SC.nativeName(wrote)});
   $("offerNo").textContent = T("offer.no", {lang: SC.nativeName()});
 
-  const settle = () => { SC.set(offerKey(), t.detected); box.hidden = true; };
+  const settle = () => { SC.set(offerKey(wrote), "asked"); box.hidden = true; };
   $("offerYes").onclick = () => {
     settle();
-    SC.setLanguage(t.detected);
+    SC.setLanguage(wrote);
     const pick = $("langPick");
-    if(pick) pick.value = t.detected;
+    if(pick) pick.value = wrote;
   };
   $("offerNo").onclick = settle;
 }
@@ -691,7 +720,7 @@ SC.mountPicker($("langPick"), () => {
   if(SC.canDictate && !$("mic").disabled){
     $("mic").title = T("voice.speakInstead");
   }
-  if(latest) $("playerLang").textContent = SC.nativeName(latest.language);
+  if(latest) $("playerLang").textContent = langName(latest.language);
 });
 </script>
 </body>

@@ -57,8 +57,32 @@ SCRIPT_TO_LANGUAGE = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Reply-only languages
+#
+# Hinglish is how a great many customers actually write -- "mera recharge
+# nahi hua, paise cut gaye". It is not a picker option (the interface has no
+# Hinglish to show), but a reply to a Hinglish message should come back in
+# Hinglish, not in textbook Hindi and not in English. Spoken with an Indian
+# English voice: a Hindi voice reading Latin letters is worse than useless.
+# ---------------------------------------------------------------------------
+HINGLISH = "hinglish"
+REPLY_ONLY = {
+    HINGLISH: {"native": "Hinglish", "english": "Hinglish",
+               "speech": "en-IN", "script": None},
+}
+
+
 def is_supported(code):
     return code in LANGUAGES
+
+
+def is_reply_language(code):
+    return code in LANGUAGES or code in REPLY_ONLY
+
+
+def _meta(code):
+    return LANGUAGES.get(code) or REPLY_ONLY.get(code) or LANGUAGES[DEFAULT_LANGUAGE]
 
 
 def normalise(code):
@@ -68,11 +92,11 @@ def normalise(code):
 
 
 def native_name(code):
-    return LANGUAGES[normalise(code)]["native"]
+    return _meta(code)["native"]
 
 
 def speech_code(code):
-    return LANGUAGES[normalise(code)]["speech"]
+    return _meta(code)["speech"]
 
 
 def detect_language(text):
@@ -112,12 +136,116 @@ def detect_language(text):
     return SCRIPT_TO_LANGUAGE.get(winner)
 
 
+# ---------------------------------------------------------------------------
+# Per-message detection
+# ---------------------------------------------------------------------------
+
+# Romanised Hindi words that are not also common English words. "me", "to",
+# "the" and "is" are deliberately absent: each is Hinglish AND English, and
+# would turn every English sentence Hinglish.
+HINGLISH_WORDS = frozenset(["hai", "hain", "nahi", "nahin", "nhi", "mera", "meri", "mere", "mujhe", "mujhko", "kya", "kyu", "kyun", "kyon", "kab", "kaise", "kaisa", "kaisi", "kitna", "kitne", "kitni", "paisa", "paise", "aur", "gaya", "gayi", "gaye", "hua", "hui", "hue", "raha", "rahi", "rahe", "kar", "karo", "karna", "karke", "kijiye", "kariye", "bhai", "bhaiya", "ji", "abhi", "tak", "wapas", "vapas", "jaldi", "bahut", "bohot", "bahot", "accha", "acha", "achha", "theek", "thik", "lekin", "koi", "kuch", "sab", "bhi", "yeh", "woh", "wo", "hum", "humara", "hamara", "aap", "aapka", "aapki", "apna", "apni", "kal", "aaj", "din", "mil", "mila", "mili", "milega", "milegi", "chahiye", "batao", "bataiye", "bataye", "dijiye", "liye", "wala", "wali", "wale", "sirf", "phir", "fir", "pata", "samajh", "bola", "bolo", "diya", "liya", "kiya", "kiye", "hoga", "hogi", "tha", "thi", "se", "ko", "ka", "ki", "ke", "ghar", "kaam", "hoti", "hota", "karta", "karti", "denge", "dena", "lena", "rakha", "rakho", "hojaye", "hojayega", "gya", "gyi", "hui", "thik", "kripya"])
+
+# Words that tell Marathi from Hindi. Both are written in Devanagari, so the
+# script alone cannot; these can.
+MARATHI_MARKERS = frozenset(
+    ["आहे", "आहेत", "नाही", "माझा", "माझे", "माझी", "मला", "तुम्ही", "झाला", "झाली", "झाले", "आणि", "पण", "काय", "केला", "केले", "केली", "होते", "होता", "होती", "मिळाले", "मिळाला", "अजून", "कधी"])
+HINDI_MARKERS = frozenset(
+    ["है", "हैं", "नहीं", "मेरा", "मेरी", "मेरे", "मुझे", "हुआ", "हुई", "और", "लेकिन", "क्या", "आप", "किया", "था", "थी", "मिला", "अभी", "तक", "कब", "कैसे"])
+
+
+# Split on space and punctuation, NOT on \W: Devanagari vowel signs are not
+# "word characters" to Python, so \w+ would cut मेरा into म and र.
+_PUNCTUATION = ".,!?;:'\"()[]{}<>/\\|@#$%^&*+=~`\u0964\u0965-\u2014\u2019\u201c\u201d"
+
+
+def _words(text):
+    out = []
+    for raw in str(text or "").lower().split():
+        word = raw.strip(_PUNCTUATION)
+        if word and not any(ch.isdigit() for ch in word):
+            out.append(word)
+    return out
+
+
+def detect_message_language(text):
+    """The language ONE message is written in, or None when it cannot tell.
+
+    Runs on every message, not once per conversation, so a customer who
+    switches mid-chat is answered in the language they just used.
+
+    None is a real answer -- "ok", "499", "SC-2004", a single "thanks" -- and
+    the caller keeps the conversation's last language rather than guessing.
+    """
+    by_script = detect_language(text)
+    if by_script in ("hi", "mr"):
+        words = set(_words(text))
+        marathi = len(words & MARATHI_MARKERS)
+        hindi = len(words & HINDI_MARKERS)
+        if marathi > hindi:
+            return "mr"
+        if hindi > marathi:
+            return "hi"
+        return "devanagari"            # one script, two languages: caller decides
+    if by_script:
+        return by_script
+
+    words = [w for w in _words(text) if w.isascii()]
+    if not words:
+        return None
+    hinglish = sum(1 for w in words if w in HINGLISH_WORDS)
+    if hinglish >= 2 and hinglish / len(words) >= 0.2:
+        return HINGLISH
+    # English needs a little evidence: a lone "thanks" or "ok" should not
+    # flip a Hindi conversation into English.
+    if len(words) >= 2 or sum(len(w) for w in words) >= 12:
+        return "en"
+    return None
+
+
+def reply_language(text, previous=None, preferred=None):
+    """Which language to answer THIS message in, and how we decided.
+
+    Returns (code, how). `how` is kept on the message so an agent can see
+    whether the language was read from what the customer wrote or carried
+    over because that message gave nothing to go on.
+    """
+    previous = previous if is_reply_language(previous or "") else None
+    preferred = preferred if is_supported(preferred or "") else None
+
+    found = detect_message_language(text)
+    if found == "devanagari":
+        # Hindi or Marathi, and the words did not settle it. Whichever of the
+        # two this conversation was already in wins; then the customer's
+        # chosen language; then Hindi, the far larger of the two.
+        for candidate in (previous, preferred):
+            if candidate in ("hi", "mr"):
+                return candidate, "detected"
+        return "hi", "detected"
+    if found:
+        return found, "detected"
+    if previous:
+        return previous, "kept"
+    if preferred:
+        return preferred, "preferred"
+    return DEFAULT_LANGUAGE, "default"
+
+
 def reply_instruction(code):
     """What to tell the model about the language it must answer in.
 
     The rules about identifiers and digits live HERE, next to the language
     list, so every caller that asks for a reply gets the same ones.
     """
+    if code == HINGLISH:
+        return (
+            "\nThe customer writes in Hinglish: Hindi, typed in Latin letters. "
+            "Reply the same way -- Hinglish in Latin letters, the way they wrote "
+            "it. Do NOT switch to Devanagari, and do not answer in formal "
+            "English.\n"
+            "- Keep every order id, refund id, tracking number, amount and date "
+            "EXACTLY as written. OD-4471 stays OD-4471, 499 stays 499.\n"
+        )
+
     code = normalise(code)
     if code == "en":
         return ""

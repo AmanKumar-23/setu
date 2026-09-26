@@ -72,14 +72,29 @@ def spy(srv, monkeypatch):
 
 # ---------------------------------------------------------------- the boundary
 
-def test_the_chosen_language_reaches_the_draft(srv, client, spy, auth_mod):
-    auth_mod.set_language("priya", "hi")
+def test_the_reply_follows_the_message_not_the_picker(srv, client, spy, auth_mod):
+    """The rule changed. The picker used to decide the reply language and a
+    different script only earned an OFFER to switch. The chat brief reverses
+    that: the reply is in whatever the customer just wrote in, with no manual
+    selection needed."""
+    auth_mod.set_language("priya", "hi")              # picker says Hindi
     sign_in(client)
     client.post("/api/portal/tickets",
                 json={"subject": "Recharge", "category": "Recharge",
-                      "description": "recharge failed, money gone"})
-    assert spy["draft"], "the draft step never ran"
-    assert spy["draft"][0] == languages.reply_instruction("hi")
+                      "description": "recharge failed, money gone"})   # English
+    assert spy["draft"], "the reply step never ran"
+    assert spy["draft"][0] == ""                       # answered in English
+
+
+def test_the_picker_is_the_fallback_when_the_message_says_nothing(
+        srv, client, spy, auth_mod):
+    """ "499" or "ok" carries no language. Then the chosen one decides."""
+    auth_mod.set_language("priya", "ta")
+    sign_in(client)
+    client.post("/api/portal/tickets",
+                json={"subject": "Recharge", "category": "Recharge",
+                      "description": "499"})
+    assert spy["draft"][0] == languages.reply_instruction("ta")
 
 
 def test_english_sends_no_instruction_at_all(srv, client, spy):
@@ -132,36 +147,52 @@ def test_an_unknown_language_is_refused_not_stored(client, auth_mod):
     assert stored_language(auth_mod, "priya") == "en"
 
 
-# ------------------------------------------------------------- the offer
+# ------------------------------------------------------ automatic switching
 
-def test_writing_in_another_script_offers_a_switch_rather_than_taking_one(
-        srv, client, spy, auth_mod):
-    sign_in(client)
+HINDI = "\u092e\u0947\u0930\u093e \u0930\u093f\u091a\u093e\u0930\u094d\u091c \u092b\u0947\u0932 \u0939\u094b \u0917\u092f\u093e \u0939\u0948"
+
+
+def test_writing_in_another_script_is_answered_in_it(srv, client, spy, auth_mod):
+    sign_in(client)                                    # picker left on English
     d = client.post("/api/portal/tickets",
                     json={"subject": "Recharge", "category": "Recharge",
-                          "description": "मेरा रिचार्ज "
-                                         "फेल हो गया है"}).get_json()
-    assert d["ticket"]["detected"] == "hi"
-    assert d["ticket"]["detected_native"] == languages.native_name("hi")
-    # Offered, not taken: the reply still went out in the chosen language.
-    assert spy["draft"][0] == ""
+                          "description": HINDI}).get_json()
+    assert spy["draft"][0] == languages.reply_instruction("hi")
+    stored = next(c for c in srv.load_cases() if c["id"] == d["ticket"]["id"])
+    assert stored["language"] == "hi"
+    # The picker is the INTERFACE language; answering in Hindi does not
+    # quietly change the customer's settings.
     assert stored_language(auth_mod, "priya") == "en"
 
 
-def test_no_offer_when_they_already_match(srv, client, spy, auth_mod):
-    auth_mod.set_language("priya", "hi")
+def test_a_switch_mid_conversation_is_followed(srv, client, spy):
     sign_in(client)
-    d = client.post("/api/portal/tickets",
-                    json={"subject": "Recharge", "category": "Recharge",
-                          "description": "मेरा रिचार्ज "
-                                         "फेल हो गया है"}).get_json()
-    assert d["ticket"]["detected"] is None
+    ticket = client.post("/api/portal/tickets", json={
+        "subject": "Recharge", "category": "Recharge",
+        "description": HINDI}).get_json()["ticket"]
+    client.post(f"/api/portal/cases/{ticket['id']}/message",
+                json={"text": "any update on this please"})
+    client.post(f"/api/portal/cases/{ticket['id']}/message",
+                json={"text": "mera paisa kab wapas milega bhai"})
+    assert spy["draft"][0] == languages.reply_instruction("hi")
+    assert spy["draft"][1] == ""                                   # English
+    assert spy["draft"][2] == languages.reply_instruction("hinglish")
+
+
+def test_a_message_with_nothing_to_detect_keeps_the_conversations_language(
+        srv, client, spy):
+    sign_in(client)
+    ticket = client.post("/api/portal/tickets", json={
+        "subject": "Recharge", "category": "Recharge",
+        "description": HINDI}).get_json()["ticket"]
+    client.post(f"/api/portal/cases/{ticket['id']}/message", json={"text": "ok"})
+    assert spy["draft"][1] == languages.reply_instruction("hi")
 
 
 def test_the_customer_never_learns_what_detection_thought_about_them(
         srv, client, spy):
-    """`detected` is the only new field on the customer's case. It says what
-    language they wrote in -- nothing about how the message was judged."""
+    """Each customer message is now analysed and tagged -- severity, intent,
+    emotion. All of it is for the agent; none of it reaches the customer."""
     sign_in(client)
     d = client.post("/api/portal/tickets",
                     json={"subject": "Recharge", "category": "Recharge",

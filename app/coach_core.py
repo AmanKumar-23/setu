@@ -248,6 +248,15 @@ class Message:
     # field, reopening a case would buy the same sentence again, and the
     # console's own save would throw the stored copy away.
     gloss_en: str = ""
+    # The language this message is in -- detected for a customer's message,
+    # chosen for a reply. Per MESSAGE, because a customer can switch halfway
+    # through, and the reply and its audio must follow them.
+    language: str = ""
+    # For a customer's message: what the analysis read in THAT message --
+    # severity, sentiment, intent, emotion -- kept against the message, not
+    # just overwritten on the case, so the history of a conversation can be
+    # read back turn by turn.
+    analysis: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -270,7 +279,8 @@ class ConversationState:
 
     def add_message(self, speaker: str, text: str, source: str = "human",
                     channel: str = "typed", author: str = "",
-                    gloss_en: str = ""):
+                    gloss_en: str = "", language: str = "",
+                    analysis: Optional[dict] = None):
         """Add a new message to the conversation history."""
         self.history.append(
             Message(
@@ -279,7 +289,9 @@ class ConversationState:
                 source=source,
                 channel=channel,
                 author=author,
-                gloss_en=gloss_en
+                gloss_en=gloss_en,
+                language=language,
+                analysis=dict(analysis or {})
             )
         )
 
@@ -581,7 +593,7 @@ log = logging.getLogger("setu.model")
 INTENTS = [
     "Recharge failed", "Refund status", "Order & delivery", "Network issue",
     "Account & login", "Billing dispute", "Cancellation", "Product question",
-    "Other",
+    "Complaint", "Technical issue", "Other",
 ]
 
 EMOTIONS = ["Calm", "Confused", "Frustrated", "Angry", "Anxious", "Satisfied"]
@@ -1778,6 +1790,16 @@ rather than generalities. Rules:
                 f"- urgency: {analysis.get('urgency', 'unknown')}\n"
                 f"- main issue: {analysis.get('key_issue', 'not identified')}"
             )
+            # Added for replies that go STRAIGHT to the customer: the tone has
+            # to fit the person, not just the problem. Absent keys are simply
+            # not mentioned, so the agent-draft callers are unaffected.
+            if analysis.get("emotion"):
+                reading += f"\n- emotion: {analysis['emotion']}"
+            if analysis.get("intent"):
+                reading += (f"\n- what they want done: {analysis['intent']}"
+                            f" (confidence {analysis.get('intent_confidence', '?')}%)")
+            if analysis.get("severity"):
+                reading += f"\n- severity: {analysis['severity']}"
         else:
             reading = "- no analysis was available for this turn"
 
@@ -1845,6 +1867,13 @@ rather than generalities. Rules:
         redactor, (transcript, reading, lookups, policy) = self._clean(
             transcript, reading, lookups, policy)
 
+        # English is the default only when no other language was asked for;
+        # otherwise this line and the language note would contradict each
+        # other, and the model would pick one.
+        english_rule = "" if language_note else (
+            "- Write the WHOLE reply in clear, simple English. Do not mix "
+            "languages within a sentence.\n")
+
         prompt = f"""
 You are an expert customer-support agent. Write the agent's next reply.
 
@@ -1859,13 +1888,16 @@ What our analysis says about this customer right now:
 {policy}
 
 Requirements:
-- Acknowledge the concern, and match your tone to the sentiment and urgency above.
+- Acknowledge the concern, and match your tone to the sentiment, emotion and
+  urgency above. An angry or frustrated customer gets a short, direct apology
+  and a concrete action -- not reassurance. An anxious one is told what happens
+  next and when. A confused one gets one plain explanation.
 - Show empathy without being sugary.
 - State the next concrete step.
 - Never promise anything the help article does not support.
-- Write the WHOLE reply in clear, simple English, even when the customer wrote
-  in Hinglish. Do not mix languages within a sentence.
-- Keep it under 90 words.
+- If the intent confidence above is below 50, you do not really know what they
+  need: acknowledge what you understood and ask ONE short question to find out.
+{english_rule}- Keep it under 90 words.
 {language_note}"""
 
         # This one returns prose, so there is no JSON shape to guarantee. The
