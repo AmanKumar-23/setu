@@ -3055,9 +3055,9 @@ def severity_for(case):
     except (TypeError, ValueError):
         score = None
     risk = case.get("escalation_risk")
-    if score is not None and score >= 85:
+    if score is not None and score >= pipeline.CRITICAL_FROM:
         return "critical", score, [f"frustration {score}/100"]
-    if risk == "high" or (score is not None and score >= 65):
+    if risk == "high" or (score is not None and score >= pipeline.HIGH_FROM):
         return "high", score, ["high escalation risk" if risk == "high"
                                else f"frustration {score}/100"]
     if risk == "medium" or (score is not None and score >= 35):

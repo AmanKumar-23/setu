@@ -198,3 +198,17 @@ def test_an_older_case_is_left_to_the_people_working_it(srv, client, case):
     client.post("/api/portal/cases/SC-OLD/message", json={"text": "any update?"})
     old = stored(srv, "SC-OLD")
     assert not [m for m in old["messages"] if m["speaker"] == "agent"]
+
+
+def test_an_ordinary_money_complaint_stays_with_the_assistant():
+    """Measured on the live model: a routine first "recharge failed, money
+    taken" scores about 65 frustration, negative, urgent. That is most
+    support tickets, and exactly what the assistant is equipped to answer --
+    it has the help article and the order lookups. It must not be escalated
+    just for being about money."""
+    routine = reading(frustration=65, sentiment="negative", urgency="high",
+                      emotion="Frustrated", intent="Recharge failed",
+                      escalation_risk="medium")
+    level, _score, reasons = pipeline.severity_of(
+        routine, "my recharge of 499 failed but the money was taken")
+    assert level == "medium", reasons

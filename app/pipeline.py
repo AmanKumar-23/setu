@@ -129,6 +129,10 @@ def try_auto_resolve(sess, text, language="en"):
 # --------------------------------------------------------------------------
 SEVERITY_LEVELS = ("low", "medium", "high", "critical")
 
+# Frustration at or above these is high / critical on its own.
+HIGH_FROM = 70
+CRITICAL_FROM = 85
+
 # Said outright, these are critical whatever the score: the customer has
 # stopped asking and started threatening.
 THREATS = ("consumer court", "consumer forum", "legal action", "lawyer",
@@ -153,19 +157,25 @@ def severity_of(analysis, text=""):
 
     rules = {
         "critical": [
-            (score >= 85, f"frustration {score}/100"),
+            (score >= CRITICAL_FROM, f"frustration {score}/100"),
             (any(t in lowered for t in THREATS),
              "threatens: " + ", ".join(t for t in THREATS if t in lowered)),
             (emotion == "Angry" and risk == "high", "angry, and high escalation risk"),
         ],
+        # Calibrated against the live model: it rates an ordinary first
+        # "recharge failed, money taken" at about 65 frustration, negative and
+        # urgent -- which is most support tickets. With the line at 65 and
+        # "urgent and unhappy" counted as high, 58% of real messages were
+        # handed to a person, including the routine ones the assistant is best
+        # equipped to answer. High now needs a real sign of trouble.
         "high": [
-            (score >= 65, f"frustration {score}/100"),
+            (score >= HIGH_FROM, f"frustration {score}/100"),
             (risk == "high", "high escalation risk"),
             (emotion == "Angry", "angry"),
             (intent in ("Cancellation", "Complaint"), f"wants: {intent}"),
-            (urgency == "high" and sentiment == "negative", "urgent and unhappy"),
         ],
         "medium": [
+            (urgency == "high" and sentiment == "negative", "urgent and unhappy"),
             (score >= 35, f"frustration {score}/100"),
             (sentiment == "negative", "negative"),
             (emotion in ("Frustrated", "Anxious"), (emotion or "").lower()),
