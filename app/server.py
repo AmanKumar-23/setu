@@ -1730,6 +1730,11 @@ def hand_to_a_person(sess, language, why, commit=None):
     at an error: a calm note in their own language, and the case routed to a
     person instead of waiting on an assistant that is not coming.
     """
+    # In the language of the conversation -- the one the customer is writing
+    # in -- not just the one their interface is set to.
+    language, _how = languages.reply_language(
+        sess.last_customer_message or "", previous=getattr(sess, "language", None),
+        preferred=language)
     note = ui_strings_cached(language).get(
         "note.assistantBusy", UI_STRINGS["note.assistantBusy"])
     # Once is enough. Every later message on a case the model cannot reach
@@ -1739,6 +1744,11 @@ def hand_to_a_person(sess, language, why, commit=None):
         sess.state.add_message("agent", note, source=SYSTEM_SOURCE)
     sess.handler = "human"
     sess.ai_pending = False
+    # Recorded like any other handover, so the agent who finds it in the
+    # queue can see WHY it is there -- not a severity, but an outage.
+    if not sess.handover:
+        sess.handover = {"at": now_iso(), "severity": None,
+                         "why": "the assistant could not reach the model"}
     (commit or (lambda s, **kw: s.persist(**kw)))(sess, reopen=True)
     log.warning("case %s handed to a person: %s", sess.case_id, why)
 
@@ -2834,30 +2844,15 @@ def prepare_reopened_case(session):
             log.warning("analysis on open failed for %s: %s",
                         session.case_id, error)
 
-    if session.last_suggestion:
-        return {"analysed": True} if analysed else None
-
-    try:
-        session.last_suggestion = session.coach.suggest_reply(
-            session.last_customer_message,
-            session.state.history,
-            analysis={
-                "sentiment": session.state.sentiment,
-                "urgency": session.state.urgency,
-                "key_issue": session.state.key_issue,
-            },
-            facts=session.facts,
-        )
-        note_redactions(session)
-        article = getattr(session.coach, "last_article", None)
-        open_rating_slot(session, article is not None,
-                         article.get("topic") if article else None)
-    except Exception as error:
-        # Loud this time. A silently swallowed draft failure is exactly what
-        # left these cases blank in the first place.
-        print(f"  DRAFT on open failed for {session.case_id}: {error}")
-        session.last_suggestion = ""
-        return None
+    # The suggestion is usually there already -- the background assistant
+    # drafts one on every customer turn. It used to return here, which meant
+    # the draft was never SCORED and the scorecard stayed empty until the
+    # agent had written something. Only the drafting is skipped now.
+    drafted = False
+    if not session.last_suggestion:
+        drafted = draft_on_open(session)
+        if not drafted:
+            return {"analysed": True} if analysed else None
 
     # Score the draft so the scorecard has something to show before the agent
     # has written anything. Marked scored="draft" so nothing downstream
@@ -2878,7 +2873,35 @@ def prepare_reopened_case(session):
         except Exception as error:
             print(f"  SCORING the draft failed for {session.case_id}: {error}")
 
-    return {"drafted": True, "scored_draft": scored_draft}
+    if not (analysed or drafted or scored_draft):
+        return None
+    return {"analysed": analysed, "drafted": drafted, "scored_draft": scored_draft}
+
+
+def draft_on_open(session):
+    """Draft a reply for a case saved without one. True if it worked."""
+    try:
+        session.last_suggestion = session.coach.suggest_reply(
+            session.last_customer_message,
+            session.state.history,
+            analysis={
+                "sentiment": session.state.sentiment,
+                "urgency": session.state.urgency,
+                "key_issue": session.state.key_issue,
+            },
+            facts=session.facts,
+        )
+        note_redactions(session)
+        article = getattr(session.coach, "last_article", None)
+        open_rating_slot(session, article is not None,
+                         article.get("topic") if article else None)
+    except Exception as error:
+        # Loud this time. A silently swallowed draft failure is exactly what
+        # left these cases blank in the first place.
+        print(f"  DRAFT on open failed for {session.case_id}: {error}")
+        session.last_suggestion = ""
+        return False
+    return True
 
 
 @app.post("/api/open-case")

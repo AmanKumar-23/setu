@@ -248,3 +248,55 @@ def test_severity_reasons_name_the_rule(srv):
         reading(frustration=60), "I will go to the consumer court")
     assert level == "critical"
     assert any("consumer court" in r for r in reasons)
+
+
+def test_opening_a_case_scores_the_draft_the_assistant_already_wrote(
+        srv, client, model, monkeypatch):
+    """The background assistant drafts a reply on every turn, so opening a
+    case found a suggestion already there -- and returned before scoring it.
+    The scorecard stayed empty until the agent had written something."""
+    from coach_core import CoachingFeedback
+    monkeypatch.setattr(srv.coach_core.AICoach, "evaluate_agent_response",
+                        lambda self, c, a: CoachingFeedback(8, 7, 9, "Lead with the date."))
+    model["next"] = reading(**ANGRY)
+    ticket = raise_ticket(client)
+    assert stored(srv, ticket["id"])["suggestion"]          # drafted already
+    agent = srv.app.test_client()
+    agent.post("/api/login", json={"username": "rahul", "password": "agent-pwxx"})
+    state = agent.post("/api/open-case", json={"id": ticket["id"]}).get_json()["state"]
+    assert state["last_feedback"]["tone_score"] == 8
+    assert state["last_feedback"]["scored"] == "draft"      # not mistaken for a human's
+
+
+def test_a_slow_turn_skips_the_optional_steps(srv, client, model, monkeypatch):
+    """On a bad day each model call is bounded, but four of them in a row made
+    a two-minute wait. Once the turn is slow, the lookup is skipped and the
+    handoff uses the translated template instead of another model call."""
+    clock = {"t": 0.0}
+    monkeypatch.setattr(pipeline.time, "perf_counter", lambda: clock["t"])
+
+    def slow_analyse(self, text, history=None):
+        clock["t"] += 40                     # the analysis alone took 40s
+        return reading(**ANGRY)
+
+    calls = {"lookup": 0, "handoff": 0}
+
+    def lookup(self, *a, **k):
+        calls["lookup"] += 1
+        return []
+
+    def handoff(self, *a, **k):
+        calls["handoff"] += 1
+        return "bespoke"
+
+    cls = srv.coach_core.AICoach
+    monkeypatch.setattr(cls, "analyze_customer_message", slow_analyse)
+    monkeypatch.setattr(cls, "gather_facts", lookup)
+    monkeypatch.setattr(cls, "handoff_message", handoff)
+
+    case = stored(srv, raise_ticket(client)["id"])
+    assert calls == {"lookup": 0, "handoff": 0}
+    note = next(m for m in case["messages"] if m.get("source") == "system")
+    assert note["text"] == srv.UI_STRINGS["handoff.escalated"]   # the template
+    assert case["handler"] == "human"                               # still escalated
+    assert "lookup_skipped" in case["perf"]

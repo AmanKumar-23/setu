@@ -1040,10 +1040,13 @@ document.addEventListener("click", e => {
    assistant handed this case over, the reason it gave. */
 function paintSeverity(s){
   const sev = s.severity || {}, box = $("sevBox");
-  if(!SEV_LABEL[sev.level]){ box.hidden = true; return; }
+  const handedOver = s.handover && s.handover.why;
+  // A case handed over during an outage has no reading yet -- but it still
+  // has a reason for being in the queue, and that is worth showing.
+  if(!SEV_LABEL[sev.level] && !handedOver){ box.hidden = true; return; }
   box.hidden = false;
-  $("sevPill").className = "pill " + sev.level;
-  $("sevPill").textContent = SEV_LABEL[sev.level];
+  $("sevPill").className = "pill " + (SEV_LABEL[sev.level] ? sev.level : "none");
+  $("sevPill").textContent = SEV_LABEL[sev.level] || "Not read yet";
   $("sevScore").textContent = sev.score != null ? `${sev.score}/100` : "";
   $("sevWhy").innerHTML = "";
   (sev.reasons || []).forEach(why => {

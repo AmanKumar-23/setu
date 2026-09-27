@@ -208,3 +208,20 @@ def test_the_error_is_logged_with_a_reference(srv, caplog):
     assert status == 502
     assert "RemoteProtocolError" not in body["error"]
     assert body["ref"] and any(body["ref"] in r.getMessage() for r in caplog.records)
+
+
+def test_an_outage_handover_says_why(srv, client):
+    """The agent who finds this in their queue should see it is there because
+    the model was unreachable, not guess at a severity."""
+    ticket = raise_ticket(client).get_json()["ticket"]
+    stored = next(c for c in srv.load_cases() if c["id"] == ticket["id"])
+    assert stored["handover"]["why"] == "the assistant could not reach the model"
+
+
+def test_the_outage_note_is_in_the_language_the_customer_writes(srv, client):
+    reply = client.post("/api/portal/tickets", json={
+        "subject": "Recharge", "category": "Recharge",
+        "description": "मेरा रिचार्ज फेल हो गया और पैसे कट गए"})
+    note = reply.get_json()["ticket"]["messages"][-1]
+    assert note["from"] == "Setu"
+    assert note["text"] == srv.ui_strings_cached("hi")["note.assistantBusy"]
