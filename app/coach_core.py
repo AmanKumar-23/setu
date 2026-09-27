@@ -1228,9 +1228,14 @@ class AICoach:
         def out_of_time(extra=0.0):
             return time.monotonic() - started + extra > self.CALL_DEADLINE_S
 
+        # An attempt can take up to REQUEST_TIMEOUT_MS, so one that STARTS
+        # with less than that left would overrun the ceiling -- which it did:
+        # a call logged as giving up after 59.9s against a 45s deadline.
+        attempt_s = self.REQUEST_TIMEOUT_MS / 1000
+
         for model_name in models_to_try:
             for attempt in range(max_attempts):
-                if out_of_time():
+                if out_of_time(attempt_s):
                     break
                 began = time.monotonic()
                 try:
@@ -1264,14 +1269,14 @@ class AICoach:
                     if any(code in detail for code in self.RETRYABLE):
                         # 1s, 2s, 4s -- but never sleep past the deadline.
                         pause = 2 ** attempt
-                        if out_of_time(pause):
+                        if out_of_time(pause + attempt_s):
                             break
                         time.sleep(pause)
                         continue
 
                     break        # will not fix itself; try the next model
 
-            if out_of_time():
+            if out_of_time(attempt_s):
                 break
 
         log.error("model call %s gave up after %.1fs across %s: %s",

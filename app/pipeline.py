@@ -196,6 +196,16 @@ def severity_of(analysis, text=""):
 # lookup, and stays with the assistant.
 NEEDS_A_PERSON = ("Cancellation", "Billing dispute")
 
+# A budget for the whole turn, in seconds since it began. Each model call is
+# bounded on its own, but four bounded calls in a row on a bad day added up to
+# two minutes of "typing" -- measured, with Gemini returning 504s. So the two
+# steps the reply can do without are skipped once the turn is already slow:
+#   the order lookup   -- the reply is written without live order data
+#   a bespoke handoff  -- the translated template is used instead
+# The analysis and the reply itself always run: without them there is no turn.
+LOOKUP_ONLY_UNDER_S = 25
+BESPOKE_HANDOFF_ONLY_UNDER_S = 35
+
 
 # --------------------------------------------------------------------------
 # The turn
@@ -296,6 +306,10 @@ def respond_to_customer(sess, text, *, language=None, commit=_persist):
         text, previous=getattr(sess, "language", None), preferred=preferred)
     sess.language = reply_lang
     timings = {}
+    turn_began = time.perf_counter()
+
+    def spent():
+        return time.perf_counter() - turn_began
 
     def timed(step, fn, *args, **kwargs):
         began = time.perf_counter()
@@ -324,11 +338,16 @@ def respond_to_customer(sess, text, *, language=None, commit=_persist):
 
     # Look up now rather than waiting for the agent to reply, so the facts are
     # on screen while they are still typing.
-    try:
-        sess.facts = timed("lookup", sess.coach.gather_facts,
-                           text, state.history, allow_writes=sess.allow_writes)
-    except Exception:
-        sess.facts = []          # a failed lookup must not lose the turn
+    if spent() < LOOKUP_ONLY_UNDER_S:
+        try:
+            sess.facts = timed("lookup", sess.coach.gather_facts,
+                               text, state.history,
+                               allow_writes=sess.allow_writes)
+        except Exception:
+            sess.facts = []      # a failed lookup must not lose the turn
+    else:
+        sess.facts = []          # already slow: answer without it
+        timings["lookup_skipped"] = int(spent() * 1000)
 
     # Anything the model asked to WRITE is recorded as a proposal. It is not
     # run here, and there is no branch below that runs it.
@@ -366,12 +385,15 @@ def respond_to_customer(sess, text, *, language=None, commit=_persist):
         # and someone is coming. In their language, and without a word about
         # severity, queues or scores.
         note_to_customer = ""
-        try:
-            note_to_customer = timed(
-                "handoff", sess.coach.handoff_message, text, state.history,
-                key_issue=state.key_issue, language_note=note)
-        except Exception:
-            note_to_customer = ""
+        if spent() < BESPOKE_HANDOFF_ONLY_UNDER_S:
+            try:
+                note_to_customer = timed(
+                    "handoff", sess.coach.handoff_message, text, state.history,
+                    key_issue=state.key_issue, language_note=note)
+            except Exception:
+                note_to_customer = ""
+        else:
+            timings["handoff_skipped"] = int(spent() * 1000)
         if not note_to_customer and _handoff_fallback is not None:
             note_to_customer = _handoff_fallback(reply_lang)
         if note_to_customer:

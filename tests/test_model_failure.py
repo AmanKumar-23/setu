@@ -97,7 +97,9 @@ def test_the_deadline_bounds_the_whole_call(core, monkeypatch):
     coach.client.models.generate_content = slow_failure
     with pytest.raises(core.ModelUnavailable):
         coach._call_model("hi")
-    assert clock["t"] <= core.AICoach.CALL_DEADLINE_S + 20   # at most one overrun
+    # Not "the ceiling plus one more attempt": an attempt that could overrun
+    # it is never started. It used to allow one, and gave up at 59.9s on 45.
+    assert clock["t"] <= core.AICoach.CALL_DEADLINE_S
 
 
 def test_every_failed_attempt_is_logged_for_the_dev_team(core, monkeypatch, caplog):
