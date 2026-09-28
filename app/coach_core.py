@@ -8,6 +8,7 @@ Source cells: 1 (key helper), 17 (knowledge base), 26 (data models), 28 (AICoach
 """
 
 import json
+import logging
 import os
 import re
 import time
@@ -222,6 +223,40 @@ class Message:
     """Represents one message in the conversation."""
     speaker: str
     text: str
+    # Who actually composed this. Only meaningful on an outgoing (agent)
+    # message, and it is the whole basis of the resolution mode: without it
+    # a deflection and a hand-typed reply are both just speaker="agent".
+    #
+    #   human   a person wrote it
+    #   hybrid  a person sent the coach's draft, as offered or edited
+    #   ai      the coach sent it with nobody in the loop
+    source: str = "human"
+    # HOW the text got here, which is a different question from who composed
+    # it: an agent can dictate their own words, and the coach's draft can be
+    # sent by a person who never touched the keyboard.
+    #
+    #   typed   somebody typed it
+    #   voice   somebody dictated it
+    channel: str = "typed"
+    # Who sent it, by name. Only set on an outgoing message, and only when a
+    # PERSON sent it -- the customer's chat shows this so that an agent
+    # taking over from the AI is visible to them rather than silent.
+    author: str = ""
+    # Plain English for a message written in another script, shown UNDER the
+    # original in the agent console. It rides on the message rather than being
+    # looked up each time because a translation is a paid call: without this
+    # field, reopening a case would buy the same sentence again, and the
+    # console's own save would throw the stored copy away.
+    gloss_en: str = ""
+    # The language this message is in -- detected for a customer's message,
+    # chosen for a reply. Per MESSAGE, because a customer can switch halfway
+    # through, and the reply and its audio must follow them.
+    language: str = ""
+    # For a customer's message: what the analysis read in THAT message --
+    # severity, sentiment, intent, emotion -- kept against the message, not
+    # just overwritten on the case, so the history of a conversation can be
+    # read back turn by turn.
+    analysis: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -234,13 +269,29 @@ class ConversationState:
     frustration: int = 0          # 0-100, judged across the whole conversation
     trend: str = "unknown"        # rising / falling / flat
     key_issue: str = ""
+    # Added with intent extraction. These default to empty rather than to
+    # "Other"/"Calm" on purpose: a conversation nobody has analysed yet has
+    # no reading, and claiming one would be the same class of mistake as the
+    # sentiment model calling "bahut ganda service hai" positive.
+    intent: str = ""
+    intent_confidence: Optional[int] = None   # 0-100, or None when not given
+    emotion: str = ""
 
-    def add_message(self, speaker: str, text: str):
+    def add_message(self, speaker: str, text: str, source: str = "human",
+                    channel: str = "typed", author: str = "",
+                    gloss_en: str = "", language: str = "",
+                    analysis: Optional[dict] = None):
         """Add a new message to the conversation history."""
         self.history.append(
             Message(
                 speaker=speaker,
-                text=text
+                text=text,
+                source=source,
+                channel=channel,
+                author=author,
+                gloss_en=gloss_en,
+                language=language,
+                analysis=dict(analysis or {})
             )
         )
 
@@ -517,12 +568,35 @@ def knowledge_gap_detector(customer_message):
 
 
 # ---- Response schemas ----
+
+# Every model failure the app can see leaves here as ONE exception type. The
+# message carries the technical detail for the server log; nothing about it is
+# fit to show a customer, and the web layer never does.
+class ModelUnavailable(ValueError):
+    """Gemini could not be reached, or would not answer in time."""
+
+log = logging.getLogger("setu.model")
+
 #
 # These are handed to the API with each request. The model is then physically
 # unable to return prose, a markdown code fence, a missing field, or a word
 # outside an enum -- the API rejects it before we ever see it. The "enum" and
 # "description" entries do real work: the model reads the descriptions, and
 # the enums make the sentiment/urgency/trend values self-validating.
+
+# The intent and emotion vocabularies.
+#
+# Defined once and used three times over: in the schema the API enforces, in
+# the prompt the model reads, and in the validation below. Three hand-copied
+# lists drift the moment somebody adds a category to one of them, and the
+# failure is silent -- the model returns a word the panel cannot paint.
+INTENTS = [
+    "Recharge failed", "Refund status", "Order & delivery", "Network issue",
+    "Account & login", "Billing dispute", "Cancellation", "Product question",
+    "Complaint", "Technical issue", "Other",
+]
+
+EMOTIONS = ["Calm", "Confused", "Frustrated", "Angry", "Anxious", "Satisfied"]
 
 ANALYSIS_SCHEMA = {
     "type": "object",
@@ -551,9 +625,22 @@ ANALYSIS_SCHEMA = {
             "type": "string",
             "description": "Short description of the customer's main problem.",
         },
+        "intent": {
+            "type": "string", "enum": INTENTS,
+            "description": "What the customer is trying to get done.",
+        },
+        "intent_confidence": {
+            "type": "integer",
+            "description": "How sure you are of the intent, from 0 to 100.",
+        },
+        "emotion": {
+            "type": "string", "enum": EMOTIONS,
+            "description": "The customer's dominant emotion in their last message.",
+        },
     },
     "required": ["sentiment", "urgency", "escalation_risk",
-                 "frustration", "trend", "key_issue"],
+                 "frustration", "trend", "key_issue",
+                 "intent", "intent_confidence", "emotion"],
 }
 
 SCORECARD_SCHEMA = {
@@ -776,8 +863,23 @@ def check_refund_status(order_id=None, refund_id=None):
     return {"refunds": refunds} if refunds else {"error": "No refunds on file."}
 
 
-def issue_refund(order_id, reason="Requested by customer"):
-    """Raise a refund against an order. THIS CHANGES DATA."""
+def _next_reference(existing, prefix, start):
+    """First free PREFIX-n reference, so a demo run produces RF-9013 rather
+    than a number that depends on how many rows happen to be in the file."""
+    used = {str(r).upper() for r in existing}
+    n = start
+    while f"{prefix}-{n}" in used:
+        n += 1
+    return f"{prefix}-{n}"
+
+
+def initiate_refund(order_id, amount=None, reason="Requested by customer"):
+    """Raise a refund against an order. THIS CHANGES DATA.
+
+    The model never reaches this function. gather_facts() records a PROPOSAL
+    when the model asks for it; the proposal runs only once a person has
+    clicked Approve, and the click is what calls this.
+    """
     data = load_orders()
     orders = data.get("orders", [])
 
@@ -792,40 +894,112 @@ def issue_refund(order_id, reason="Requested by customer"):
         return {"error": "A refund already exists for this order.",
                 "refund": existing}
 
-    today = datetime.now()
+    # A partial refund is legitimate; a refund larger than the order is not,
+    # and neither is a negative one. Both are refused here rather than in the
+    # UI, because this function is the last thing between a click and the data.
+    try:
+        value = int(order["amount"] if amount in (None, "") else amount)
+    except (TypeError, ValueError):
+        return {"error": f"{amount!r} is not a usable refund amount."}
+
+    if not 0 < value <= int(order["amount"]):
+        return {"error": f"A refund must be between 1 and the order total "
+                         f"({order['amount']})."}
+
+    now = datetime.now()
     refund = {
-        "refund_id": f"RF-{9000 + len(data.get('refunds', [])) + 13}",
+        "refund_id": _next_reference(
+            [r["refund_id"] for r in data.get("refunds", [])], "RF", 9013),
         "order_id": order["order_id"],
-        "amount": order["amount"],
+        "amount": value,
         "currency": order.get("currency", "INR"),
         "status": "processing",
-        "initiated_on": today.strftime("%Y-%m-%d"),
-        "expected_by": (today + timedelta(days=5)).strftime("%Y-%m-%d"),
+        "initiated_on": now.strftime("%Y-%m-%d"),
+        "expected_by": (now + timedelta(days=5)).strftime("%Y-%m-%d"),
         "method": "original payment method",
         "reason": reason,
     }
     data.setdefault("refunds", []).append(refund)
     save_orders(data)
-    return refund
+    return {
+        "action": "initiate_refund",
+        "reference": refund["refund_id"],
+        "at": now.isoformat(timespec="seconds"),
+        "summary": (f"Refund initiated for {refund['currency']} {value} "
+                    f"on {order['order_id']}"),
+        "refund": refund,
+    }
 
 
-def send_password_reset(email=None):
-    """Send a password reset link. THIS CHANGES DATA."""
+def expedite_delivery(order_id):
+    """Move an order to the fastest available service. THIS CHANGES DATA."""
+    data = load_orders()
+    order = next((o for o in data.get("orders", [])
+                  if o["order_id"].lower() == str(order_id).lower()), None)
+
+    if order is None:
+        return {"error": f"No order {order_id} exists on this account."}
+    if str(order.get("status", "")).lower() == "delivered":
+        return {"error": "That order has already been delivered."}
+    if order.get("expedited"):
+        return {"error": "That order has already been expedited.",
+                "expedited": order["expedited"]}
+
+    now = datetime.now()
+    reference = _next_reference(
+        [e["reference"] for e in data.get("expedites", [])], "EX", 2001)
+    expected_on = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    order["expedited"] = {"reference": reference,
+                          "at": now.isoformat(timespec="seconds")}
+    order["expected_on"] = expected_on
+    data.setdefault("expedites", []).append({
+        "reference": reference, "order_id": order["order_id"],
+        "at": now.isoformat(timespec="seconds"), "expected_on": expected_on,
+    })
+    save_orders(data)
+    return {
+        "action": "expedite_delivery",
+        "reference": reference,
+        "at": now.isoformat(timespec="seconds"),
+        "summary": (f"Delivery expedited on {order['order_id']}, "
+                    f"now expected {expected_on}"),
+        "order_id": order["order_id"],
+        "expected_on": expected_on,
+    }
+
+
+def reset_account_access(customer_id=None):
+    """Send the customer a fresh sign-in link. THIS CHANGES DATA."""
     data = load_orders()
     account = data.get("account", {})
 
     if not account:
         return {"error": "The account system is unavailable."}
 
-    if email and email.lower() != account.get("email", "").lower():
-        return {"error": "That email is not on this account."}
+    known = str(account.get("customer_id") or "")
+    if customer_id and known and str(customer_id).lower() != known.lower():
+        return {"error": f"{customer_id} is not the customer on this account."}
 
-    stamp = datetime.now().isoformat(timespec="seconds")
-    account["password_reset_sent_at"] = stamp
+    now = datetime.now()
+    reference = _next_reference(
+        [r["reference"] for r in data.get("access_resets", [])], "AR", 3001)
+
+    account["password_reset_sent_at"] = now.isoformat(timespec="seconds")
     data["account"] = account
+    data.setdefault("access_resets", []).append({
+        "reference": reference, "customer_id": known or None,
+        "at": now.isoformat(timespec="seconds"),
+    })
     save_orders(data)
-    return {"sent_to": account.get("email"), "sent_at": stamp,
-            "expires_in_minutes": 30}
+    return {
+        "action": "reset_account_access",
+        "reference": reference,
+        "at": now.isoformat(timespec="seconds"),
+        "summary": f"Access reset sent to {account.get('email')}",
+        "sent_to": account.get("email"),
+        "expires_in_minutes": 30,
+    }
 
 
 # ---- what the model is allowed to ask for ----
@@ -864,16 +1038,20 @@ BACK_OFFICE = {
             },
         ),
     },
-    "issue_refund": {
-        "run": issue_refund, "writes": True,
+    "initiate_refund": {
+        "run": initiate_refund, "writes": True,
         "declaration": types.FunctionDeclaration(
-            name="issue_refund",
-            description="Raise a refund against an order. Changes data, so it "
-                        "needs a human to approve it.",
+            name="initiate_refund",
+            description="PROPOSE a refund against an order. You are not "
+                        "carrying this out -- a human reviews and approves "
+                        "every proposal before anything changes.",
             parameters_json_schema={
                 "type": "object",
                 "properties": {
                     "order_id": {"type": "string", "description": "e.g. OD-4471"},
+                    "amount": {"type": "integer",
+                               "description": "Amount to refund. Omit for the "
+                                              "full order value."},
                     "reason": {"type": "string",
                                "description": "Why the refund is being raised"},
                 },
@@ -881,23 +1059,63 @@ BACK_OFFICE = {
             },
         ),
     },
-    "send_password_reset": {
-        "run": send_password_reset, "writes": True,
+    "expedite_delivery": {
+        "run": expedite_delivery, "writes": True,
         "declaration": types.FunctionDeclaration(
-            name="send_password_reset",
-            description="Email a password reset link. Changes data, so it "
-                        "needs a human to approve it.",
+            name="expedite_delivery",
+            description="PROPOSE moving an order to the fastest service. You "
+                        "are not carrying this out -- a human reviews and "
+                        "approves every proposal before anything changes.",
             parameters_json_schema={
                 "type": "object",
                 "properties": {
-                    "email": {"type": "string",
-                              "description": "The account email. Optional."},
+                    "order_id": {"type": "string", "description": "e.g. OD-4468"},
+                },
+                "required": ["order_id"],
+            },
+        ),
+    },
+    "reset_account_access": {
+        "run": reset_account_access, "writes": True,
+        "declaration": types.FunctionDeclaration(
+            name="reset_account_access",
+            description="PROPOSE sending the customer a fresh sign-in link. "
+                        "You are not carrying this out -- a human reviews and "
+                        "approves every proposal before anything changes.",
+            parameters_json_schema={
+                "type": "object",
+                "properties": {
+                    "customer_id": {"type": "string",
+                                    "description": "e.g. CU-1001. Optional."},
                 },
             },
         ),
     },
 }
 
+WRITE_TOOLS = {name for name, t in BACK_OFFICE.items() if t["writes"]}
+
+
+def tools_for(allow_writes):
+    """The declarations handed to the API for this turn.
+
+    With actions off, the write declarations are NOT SENT. The model is not
+    told these functions exist, so there is no call for it to make and no
+    refusal for anyone to have to trust.
+
+    That is a stronger guarantee than offering a tool and declining to run it.
+    Declining server-side leaves the model believing an action is available:
+    it proposes one in its prose, the refusal happens somewhere the agent
+    cannot see, and the safety of the whole thing rests on a branch that has
+    to be right every time. Withholding the declaration removes the question.
+    """
+    return [types.Tool(function_declarations=[
+        t["declaration"] for t in BACK_OFFICE.values()
+        if allow_writes or not t["writes"]
+    ])]
+
+
+# Kept for the read-only path and for anything that just wants the full list.
 BACK_OFFICE_TOOL = types.Tool(
     function_declarations=[t["declaration"] for t in BACK_OFFICE.values()]
 )
@@ -922,15 +1140,24 @@ class AICoach:
                 "run Step 2 again."
             )
 
-        self.client = genai.Client(api_key=api_key)
+        # A timeout on every request. Without one, a connection the server
+        # has half-closed can hang a request -- and the customer waiting on
+        # it -- for as long as the operating system feels like.
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=self.REQUEST_TIMEOUT_MS),
+        )
         self.last_redactions = []      # what the most recent call took out
         self.last_article = None       # the help article behind the last reply
 
-        # You can change this through an environment variable, for example
-        # os.environ["GEMINI_MODEL"] = "gemini-3.7-flash" for the newest model.
+        # Flash-lite by default, deliberately. The full flash model hits the
+        # free tier's per-minute limit constantly, and every retry costs a
+        # 1s/2s/4s backoff before the fallback -- measured at 90s for a single
+        # draft against 3.6s on lite. Set GEMINI_MODEL to override, for
+        # example os.environ["GEMINI_MODEL"] = "gemini-3.5-flash".
         self.model = os.getenv(
             "GEMINI_MODEL",
-            "gemini-3.5-flash"
+            "gemini-3.5-flash-lite"
         )
 
     # ---------------- Helper functions ----------------
@@ -950,8 +1177,28 @@ class AICoach:
     # models get overloaded at peak times, and a demo should survive that.
     FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
 
-    # Errors worth waiting out: 503 = model busy, 429 = rate limited.
-    RETRYABLE = ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]
+    # Errors worth waiting out. The first four are the API saying "busy" or
+    # "slow down". The rest are the CONNECTION failing rather than the API
+    # answering -- a server that drops the socket mid-request raises
+    # RemoteProtocolError, which is not an HTTP status at all. This list used
+    # to stop at the first four, so a dropped connection was never retried:
+    # each model was tried once and abandoned, and the customer saw the raw
+    # exception. 500/INTERNAL is here too because Gemini's are overwhelmingly
+    # transient.
+    RETRYABLE = ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED",
+                 "500", "INTERNAL",
+                 "RemoteProtocolError", "Server disconnected",
+                 "ConnectError", "ReadError", "WriteError",
+                 "ReadTimeout", "ConnectTimeout", "TimeoutException",
+                 "timed out", "Connection reset", "ConnectionError"]
+
+    # One request may take this long before it is abandoned and retried.
+    REQUEST_TIMEOUT_MS = 20_000
+
+    # The whole call -- every retry on every model -- gives up after this.
+    # Without a ceiling, three attempts on two models with backoff can run
+    # well past a minute, and whoever is waiting just watches a spinner.
+    CALL_DEADLINE_S = 45
     # A malformed request is our fault, not the model's -- every other model
     # rejects it in exactly the same way, so falling back only doubles the
     # latency and the quota spent before we give up.
@@ -976,9 +1223,21 @@ class AICoach:
                 models_to_try.append(name)
 
         last_problem = "no attempt was made"
+        started = time.monotonic()
+
+        def out_of_time(extra=0.0):
+            return time.monotonic() - started + extra > self.CALL_DEADLINE_S
+
+        # An attempt can take up to REQUEST_TIMEOUT_MS, so one that STARTS
+        # with less than that left would overrun the ceiling -- which it did:
+        # a call logged as giving up after 59.9s against a 45s deadline.
+        attempt_s = self.REQUEST_TIMEOUT_MS / 1000
 
         for model_name in models_to_try:
             for attempt in range(max_attempts):
+                if out_of_time(attempt_s):
+                    break
+                began = time.monotonic()
                 try:
                     response = self.client.models.generate_content(
                         model=model_name,
@@ -987,23 +1246,43 @@ class AICoach:
                     )
                     self.last_model_used = model_name
                     report_usage(operation, model_name, response)
+                    took = time.monotonic() - began
+                    if took > 8:
+                        log.info("model %s answered %s in %.1fs",
+                                 model_name, operation, took)
                     return response
 
                 except Exception as error:
-                    last_problem = f"{type(error).__name__}: {error}"
+                    # The type matters as much as the text: a dropped socket
+                    # is "RemoteProtocolError" in the type name, not the text.
+                    detail = f"{type(error).__name__}: {error}"
+                    last_problem = detail
+                    log.warning("model %s %s attempt %d failed after %.1fs: %s",
+                                model_name, operation, attempt + 1,
+                                time.monotonic() - began, detail)
 
-                    if any(code in str(error) for code in self.RETRYABLE):
-                        time.sleep(2 ** attempt)      # 1s, then 2s, then 4s
-                        continue
-
-                    if any(code in str(error) for code in self.FATAL):
-                        raise ValueError(
-                            f"Gemini rejected the request -> {last_problem}"
+                    if any(code in detail for code in self.FATAL):
+                        raise ModelUnavailable(
+                            f"Gemini rejected the request -> {detail}"
                         ) from error
+
+                    if any(code in detail for code in self.RETRYABLE):
+                        # 1s, 2s, 4s -- but never sleep past the deadline.
+                        pause = 2 ** attempt
+                        if out_of_time(pause + attempt_s):
+                            break
+                        time.sleep(pause)
+                        continue
 
                     break        # will not fix itself; try the next model
 
-        raise ValueError(
+            if out_of_time(attempt_s):
+                break
+
+        log.error("model call %s gave up after %.1fs across %s: %s",
+                  operation, time.monotonic() - started,
+                  ", ".join(models_to_try), last_problem)
+        raise ModelUnavailable(
             "Gemini could not be reached after trying "
             f"{', '.join(models_to_try)}. Last problem -> {last_problem}"
         )
@@ -1129,6 +1408,21 @@ How to judge:
 - If this is the first customer message, there is no trajectory yet, so the
   trend is "flat".
 
+Intent and emotion:
+- The intent is what the customer wants DONE, not how they feel about it.
+  "Where is my money" after a failed payment is "Refund status", not
+  "Billing dispute" -- a dispute is a charge they say is wrong, not one they
+  are already owed back.
+- Choose "Other" only when nothing in the list fits. A weak fit reported with
+  a low confidence is more useful than "Other" with a high one.
+- intent_confidence is about the CATEGORY, not the severity. Around 90 when
+  the customer names the problem outright, around 40 when you are inferring
+  it from one vague line.
+- The emotion is the dominant one in the LAST message, judged in context.
+  "Confused", "Anxious" and "Frustrated" are distinct: confusion is not
+  understanding, anxiety is fear of the outcome, frustration is understanding
+  perfectly well and being blocked anyway.
+
 The shape of your answer is fixed by the response schema, so just fill it in.
 """
 
@@ -1153,7 +1447,147 @@ The shape of your answer is fixed by the response schema, so just fill it in.
         if reading.get("trend") not in ("rising", "falling", "flat"):
             reading["trend"] = "flat"
 
+        # ---- intent, confidence and emotion ----
+        #
+        # The schema's enum makes a bad value unlikely, but not impossible:
+        # the lite model we fall back to on a rate limit does not always
+        # honour the schema. A category the panel cannot paint must never be
+        # the thing that breaks the panel.
+        raw_intent = reading.get("intent")
+        if raw_intent not in INTENTS:
+            if raw_intent:          # absent is not the same as wrong
+                print(f"  analyse: intent {raw_intent!r} is not in INTENTS, "
+                      f"storing 'Other'")
+            reading["intent"] = "Other"
+
+        # Emotion has no "Other", and defaulting to "Calm" would assert
+        # something the model never said -- a falsely reassuring reading is
+        # the one failure this panel exists to prevent. So an unusable value
+        # becomes no value, and the pill renders as a dash.
+        raw_emotion = reading.get("emotion")
+        if raw_emotion not in EMOTIONS:
+            if raw_emotion:
+                print(f"  analyse: emotion {raw_emotion!r} is not in EMOTIONS, "
+                      f"storing nothing")
+            reading["emotion"] = ""
+
+        # Missing confidence stays None rather than becoming 0, so the panel
+        # can hide the label entirely instead of showing a number nobody
+        # measured. 0 would read as "certainly not", which is a claim.
+        try:
+            reading["intent_confidence"] = max(
+                0, min(100, int(reading["intent_confidence"])))
+        except (KeyError, TypeError, ValueError):
+            reading["intent_confidence"] = None
+
         return reading
+
+    def handoff_message(self, customer_message: str,
+                        conversation_history: Optional[List[Message]] = None,
+                        key_issue: str = "", language_note: str = "") -> str:
+        """What the customer reads at the moment a person takes over.
+
+        Written for THIS customer and THIS problem, in their language -- a
+        canned "your ticket has been escalated" is exactly the tone the moment
+        needs to avoid. It must reassure without exposing the machinery: no
+        severity, no queue, no score, no "escalation", no mention of AI. Metered
+        as its own step ("handoff").
+        """
+        self._operation = "handoff"
+
+        turns = list(conversation_history or [])
+        while turns and turns[-1].speaker == "agent":
+            turns.pop()
+        if not turns or turns[-1].text != customer_message:
+            turns.append(Message(speaker="customer", text=customer_message))
+        transcript = "\n".join(f"{t.speaker}: {t.text}" for t in turns[-8:])
+        redactor, (transcript, key_issue) = self._clean(transcript, key_issue or "")
+
+        english_rule = "" if language_note else "- Write in clear, simple English.\n"
+        prompt = f"""
+A customer is being handed from the automated assistant to a member of the
+support team, who will reply personally. Write the short message the
+customer sees at this moment.
+
+Conversation so far:
+{transcript}
+
+Their issue: {key_issue or "see the conversation"}
+
+Requirements:
+- Acknowledge their specific issue in one sentence, warmly. If they have been
+  let down or kept waiting, apologise for that plainly.
+- Tell them a member of our support team is taking over this conversation
+  personally and will reply here.
+- Do NOT mention escalation, severity, priority, queues, scores, tickets being
+  flagged, AI, bots, automation or systems. Speak like a person.
+- Do NOT promise a time, a refund, a replacement or any outcome.
+- Two or three short sentences.
+{english_rule}{language_note}"""
+
+        reply = self._ask_for_json(prompt, REPLY_SCHEMA)["reply"].strip()
+        self.last_redactions = redactor.log()
+        return redactor.restore(reply)
+
+    def translate_for_agent(self, text: str) -> str:
+        """Plain English for a message the customer wrote in their own script.
+
+        Shown UNDER the original in the agent console, never instead of it --
+        the agent should see what the customer actually said. Metered as its
+        own step ("translate") because it is a real extra call, and the Cost
+        page should not hide it inside the draft.
+        """
+        self._operation = "translate"
+
+        redactor, (cleaned,) = self._clean(text)
+        reply = self._ask_model(
+            "Translate this customer support message into plain English.\n"
+            "Return ONLY the translation, no notes and no quotes.\n"
+            "Keep every order id, refund id, amount and date exactly as "
+            "written, and keep digits in Latin numerals.\n\n"
+            f"{cleaned}"
+        )
+        self.last_redactions = redactor.log()
+        return redactor.restore(reply.strip())
+
+    def translate_lines(self, lines: list, language_note: str) -> list:
+        """Short UI labels in the customer's language, in one call.
+
+        The FAQ card shows six fixed phrases. Translating them one at a time
+        would be six calls for a page load, so they go together and the
+        caller caches the result per language -- a language costs one call
+        for the life of the process, not one per visit. Metered as
+        "translate" like every other extra call.
+
+        Falls back to the English lines if the model returns the wrong shape.
+        A label in the wrong language is a nuisance; a crashed portal is not.
+        """
+        if not lines or not language_note:
+            return list(lines)
+
+        self._operation = "translate"
+
+        numbered = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(lines))
+        reply = self._ask_model(
+            "Translate these customer-support topic labels.\n"
+            f"{language_note}\n"
+            "Keep them SHORT -- they are buttons, not sentences.\n"
+            "Return exactly one translation per line, numbered the same way, "
+            "and nothing else.\n\n"
+            f"{numbered}"
+        )
+
+        out = []
+        for raw in reply.strip().splitlines():
+            text = raw.strip()
+            if not text:
+                continue
+            head, sep, rest = text.partition(".")
+            if sep and head.strip().isdigit():
+                text = rest.strip()
+            out.append(text)
+
+        return out if len(out) == len(lines) else list(lines)
 
     # ---------------- 2. Evaluate agent response ----------------
 
@@ -1272,11 +1706,16 @@ rather than generalities. Rules:
                 response = self._call_model(
                     history,
                     types.GenerateContentConfig(
-                        tools=[BACK_OFFICE_TOOL],
+                        tools=tools_for(allow_writes),
                         # We run the functions ourselves, so the SDK must not.
                         automatic_function_calling=
                             types.AutomaticFunctionCallingConfig(disable=True),
                     ),
+                    # Without this the loop reported itself as "generate",
+                    # because that is _call_model's default -- so every token
+                    # the lookup step spent was filed under the wrong step on
+                    # the Cost page. self._operation is already "lookup" here.
+                    operation=self._operation,
                 )
             except Exception as error:
                 # A lookup failing must never stop us replying to the customer.
@@ -1304,11 +1743,18 @@ rather than generalities. Rules:
                 if tool is None:
                     result = {"error": f"No such function: {call.name}"}
                     ran = False
-                elif tool["writes"] and not allow_writes:
-                    # Requested, deliberately not run.
-                    result = {"status": "awaiting approval",
-                              "detail": "A person must approve this action "
-                                        "before it is carried out."}
+                elif tool["writes"]:
+                    # NEVER run from inside this loop -- not on high
+                    # confidence, not on low risk, not ever.
+                    #
+                    # allow_writes decided whether the model was allowed to
+                    # ASK. It has no say in whether the action HAPPENS. That
+                    # is a person clicking Approve, which calls tool["run"]
+                    # from the approval route, nowhere near the model.
+                    result = {"status": "proposed",
+                              "detail": "Recorded as a proposed action. A "
+                                        "person must approve it before "
+                                        "anything changes."}
                     ran = False
                 else:
                     try:
@@ -1321,7 +1767,10 @@ rather than generalities. Rules:
                 performed.append({"name": call.name, "args": args,
                                   "result": result,
                                   "writes": bool(tool and tool["writes"]),
-                                  "ran": ran})
+                                  "ran": ran,
+                                  # a write the model asked for, awaiting a
+                                  # human decision
+                                  "proposed": bool(tool and tool["writes"])})
                 # The RESULT is full of real order ids, emails and amounts,
                 # and it is about to be sent straight back to the model. Clean
                 # it on the way out; the untouched copy stays in `performed`
@@ -1350,8 +1799,17 @@ rather than generalities. Rules:
         customer_message: str,
         conversation_history: Optional[List[Message]] = None,
         analysis: Optional[dict] = None,
-        facts: Optional[list] = None
+        facts: Optional[list] = None,
+        language_note: str = ""
     ) -> str:
+        """`language_note` is the instruction telling the model which language
+        to answer in, built by app/languages.py. Empty means English.
+
+        It is the ONLY multilingual knob in this class. Analysis, lookups and
+        scoring stay in English whatever the customer writes, because the
+        dashboard, the work queue and the knowledge grouping all depend on
+        one vocabulary -- "recharge failed" has to group across languages,
+        and an agent has to be able to read the queue."""
         self._operation = "draft"
 
         # ---- 1. The conversation, written out exactly ONCE ----
@@ -1384,6 +1842,16 @@ rather than generalities. Rules:
                 f"- urgency: {analysis.get('urgency', 'unknown')}\n"
                 f"- main issue: {analysis.get('key_issue', 'not identified')}"
             )
+            # Added for replies that go STRAIGHT to the customer: the tone has
+            # to fit the person, not just the problem. Absent keys are simply
+            # not mentioned, so the agent-draft callers are unaffected.
+            if analysis.get("emotion"):
+                reading += f"\n- emotion: {analysis['emotion']}"
+            if analysis.get("intent"):
+                reading += (f"\n- what they want done: {analysis['intent']}"
+                            f" (confidence {analysis.get('intent_confidence', '?')}%)")
+            if analysis.get("severity"):
+                reading += f"\n- severity: {analysis['severity']}"
         else:
             reading = "- no analysis was available for this turn"
 
@@ -1451,6 +1919,13 @@ rather than generalities. Rules:
         redactor, (transcript, reading, lookups, policy) = self._clean(
             transcript, reading, lookups, policy)
 
+        # English is the default only when no other language was asked for;
+        # otherwise this line and the language note would contradict each
+        # other, and the model would pick one.
+        english_rule = "" if language_note else (
+            "- Write the WHOLE reply in clear, simple English. Do not mix "
+            "languages within a sentence.\n")
+
         prompt = f"""
 You are an expert customer-support agent. Write the agent's next reply.
 
@@ -1465,14 +1940,17 @@ What our analysis says about this customer right now:
 {policy}
 
 Requirements:
-- Acknowledge the concern, and match your tone to the sentiment and urgency above.
+- Acknowledge the concern, and match your tone to the sentiment, emotion and
+  urgency above. An angry or frustrated customer gets a short, direct apology
+  and a concrete action -- not reassurance. An anxious one is told what happens
+  next and when. A confused one gets one plain explanation.
 - Show empathy without being sugary.
 - State the next concrete step.
 - Never promise anything the help article does not support.
-- Write the WHOLE reply in clear, simple English, even when the customer wrote
-  in Hinglish. Do not mix languages within a sentence.
-- Keep it under 90 words.
-"""
+- If the intent confidence above is below 50, you do not really know what they
+  need: acknowledge what you understood and ask ONE short question to find out.
+{english_rule}- Keep it under 90 words.
+{language_note}"""
 
         # This one returns prose, so there is no JSON shape to guarantee. The
         # schema still earns its keep: a single "reply" field makes it

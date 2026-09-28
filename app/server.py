@@ -21,13 +21,17 @@ import io
 import json
 import logging
 import os
+import re
+import secrets
 import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
-from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 
 from flask import Flask, Response, jsonify, redirect, request, send_from_directory
 from flask_login import current_user, login_user, logout_user
@@ -35,9 +39,13 @@ from flask_login import current_user, login_user, logout_user
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import auth  # noqa: E402  (needs HERE on the path)
+import actions  # noqa: E402  (needs HERE on the path)
+import auth  # noqa: E402
+import languages  # noqa: E402
 import metering  # noqa: E402
-from auth import require_role  # noqa: E402
+import pipeline  # noqa: E402
+from auth import require_exact, require_role  # noqa: E402
+from pipeline import note_redactions, open_rating_slot  # noqa: E402
 
 try:
     import coach_core
@@ -57,79 +65,167 @@ app = Flask(__name__, static_folder=os.path.join(HERE, "static"))
 # analyze_customer_message() now returns a real 0-100 frustration score of its
 # own, so the old low/medium/high -> number lookup is gone. This stays only as
 # a fallback for a response that somehow arrives without one.
-FALLBACK_SCORE = {"low": 25, "medium": 55, "high": 90}
-
 # The canned questions offered in the console, so an agent (or you, during a
 # demo) can pick a common issue instead of typing it out. The topics mirror
 # the KNOWLEDGE_BASE categories in Part 1 of the notebook, and the keywords
 # are what we count cases against for the dashboard's volume figures.
+# The six quick-fill chips in the console. Their `text` is the AGENT's
+# opening line, not the customer's complaint: customers write their own
+# messages in their own workspace now, so a chip that filled the box with
+# "mera recharge nahi hua" would be putting words in the wrong mouth.
+#
+# `keywords` still describe the CUSTOMER's language, because that is what the
+# dashboard's Knowledge section matches saved cases against.
 FAQS = [
     {
         "id": "recharge", "icon": "📱",
         "label": "Recharge failed, money deducted",
-        "text": "mera recharge nahi hua but paise cut gaye",
+        "question": "My recharge failed but the money was deducted from my "
+                    "account. When will I get it back?",
+        "text": "I can see the recharge did not go through even though the "
+                "amount was debited. Let me check the refund for you now.",
         "keywords": ["recharge", "paise cut", "deducted", "prepaid"],
     },
     {
         "id": "refund", "icon": "💸",
         "label": "Refund still not received",
-        "text": "bhai 2 din ho gaye, abhi tak refund nahi aaya",
+        "question": "My refund has still not reached my account. Where is it "
+                    "and how long does it take?",
+        "text": "Thank you for your patience. Let me look up exactly where "
+                "your refund has reached and when it will land.",
         "keywords": ["refund", "money back", "reversal", "paise wapas"],
     },
     {
         "id": "delivery", "icon": "📦",
         "label": "Order has not arrived",
-        "text": "bhai order abhi tak nahi aaya, bahut ganda service hai",
+        "question": "My order has not arrived yet. Where is my parcel?",
+        "text": "I am sorry your order has not reached you. Let me check "
+                "where the parcel is and what the courier has recorded.",
         "keywords": ["order", "delivery", "deliver", "parcel", "shipment"],
     },
     {
         "id": "network", "icon": "📶",
         "label": "Internet / network down",
-        "text": "My internet has stopped working since this morning.",
+        "question": "My internet is not working and the network keeps "
+                    "dropping. What should I do?",
+        "text": "Sorry about the connection trouble. Let me check for an "
+                "outage in your area before we try anything on your device.",
         "keywords": ["internet", "network", "signal", "slow", "connection"],
     },
     {
         "id": "account", "icon": "🔑",
         "label": "Cannot log in",
-        "text": "I cannot log in and the password reset email never arrives.",
+        "question": "I cannot log in to my account. My password is not "
+                    "working and the OTP does not arrive.",
+        "text": "Let me get you back into your account. I will check what is "
+                "registered and send a fresh sign-in link.",
         "keywords": ["log in", "login", "password", "otp", "account"],
     },
     {
         "id": "escalate", "icon": "⚠️",
         "label": "Threatening to cancel",
-        "text": "This is the third time I am asking. I want to cancel and I will "
-                "take this further.",
+        "question": "This has gone on too long. I want to cancel my account "
+                    "and raise a complaint.",
+        "text": "I understand, and I am sorry you have had to ask more than "
+                "once. Let me take ownership of this and get it resolved today.",
         "keywords": ["cancel", "legal", "complaint", "consumer court", "escalate"],
+    },
+
+    # ------------------------------------------------------------------
+    # Portal-only topics. The six above are also the agent console's chips
+    # and the dashboard's Knowledge groups, and those stay exactly as they
+    # were; these appear only on the customer's Common issues card.
+    #
+    # Chosen from two sources, and it is worth saying which is which:
+    #   FROM THE DATA   invoice, bulk -- the only two subjects in the saved
+    #                   cases that none of the six above already covered
+    #   FROM THE BRIEF  the other six. None of them occurs in the cases yet;
+    #                   their live counts will say whether they earn a place.
+    # ------------------------------------------------------------------
+    {
+        "id": "payment", "icon": "💳", "portal_only": True,
+        "label": "Payment failed but charged",
+        "question": "My payment failed but the amount was still charged to my "
+                    "card or UPI. Please help me get it back.",
+        "text": "I can see the payment did not complete. Let me check what "
+                "was charged and start the reversal for you.",
+        # Not bare "payment": recharge tickets say "the payment was captured"
+        # and would all be counted here too, inflating this tag with another's.
+        "keywords": ["payment failed", "payment declined", "card declined",
+                     "charged twice", "debited twice", "double charged",
+                     "transaction failed", "upi failed"],
+    },
+    {
+        "id": "wrong-item", "icon": "📦", "portal_only": True,
+        "label": "Wrong item delivered",
+        "question": "I received the wrong item in my order. I need the "
+                    "correct one or a replacement.",
+        "text": "Sorry you received the wrong item. Let me arrange the "
+                "correct one and a pickup for this one.",
+        "keywords": ["wrong item", "wrong product", "different product",
+                     "incorrect item", "not what i ordered", "replacement"],
+    },
+    {
+        "id": "locked", "icon": "🔒", "portal_only": True,
+        "label": "Account locked / suspended",
+        "question": "My account has been locked or suspended and I cannot "
+                    "use it. Why, and how do I get it back?",
+        "text": "Let me look at why the account was locked and get you back "
+                "in safely.",
+        "keywords": ["locked", "suspended", "blocked", "deactivated",
+                     "account disabled"],
+    },
+    {
+        "id": "subscription", "icon": "📅", "portal_only": True,
+        "label": "Plan or subscription not activated",
+        "question": "I paid for a plan or subscription but it has not been "
+                    "activated on my account.",
+        "text": "Let me check the payment against the plan and get it "
+                "switched on for you.",
+        "keywords": ["subscription", "plan not activated", "not activated",
+                     "pack not", "plan not active"],
+    },
+    {
+        "id": "app-crash", "icon": "📱", "portal_only": True,
+        "label": "App keeps crashing",
+        "question": "The app keeps crashing or freezing when I open it.",
+        "text": "Sorry about the crashes. Let me get your device and app "
+                "version so we can find the cause.",
+        "keywords": ["crash", "crashing", "freez", "app not opening",
+                     "app closes", "hangs"],
+    },
+    {
+        "id": "profile", "icon": "👤", "portal_only": True,
+        "label": "Unable to update profile",
+        "question": "I cannot update my profile details -- the change does "
+                    "not save.",
+        "text": "Let me look at what is stopping the change from saving on "
+                "your profile.",
+        "keywords": ["update profile", "change my name", "update my details",
+                     "profile not", "change address", "update address"],
+    },
+    {
+        "id": "invoice", "icon": "🧾", "portal_only": True,
+        "label": "Need a GST invoice or bill",
+        "question": "I need a GST invoice or a bill for my purchase.",
+        "text": "Happy to help with the invoice. Let me pull the order it "
+                "belongs to.",
+        "keywords": ["invoice", "gst", "bill copy", "receipt", "tax invoice"],
+    },
+    {
+        "id": "bulk", "icon": "🏢", "portal_only": True,
+        "label": "Bulk or business order",
+        "question": "I want to place a bulk order for my business. Is there a "
+                    "corporate discount?",
+        "text": "Thanks for thinking of us for your business. Let me connect "
+                "you with the right team.",
+        "keywords": ["bulk", "corporate", "business order", "employees",
+                     "wholesale"],
     },
 ]
 
-def is_knowledge_gap(text):
-    """True when we have nothing at all to answer this question with.
 
-    Two independent misses are required:
-      1. knowledge_gap_detector() from Part 1 of the notebook finds no help
-         article (it also appends to the notebook's KNOWLEDGE_GAP_LOG), and
-      2. none of the FAQ topics above matches on keywords either.
 
-    A gap is not a bug. It is a real customer asking something the
-    documentation cannot answer -- which is to say, a help article somebody
-    still has to write.
-    """
-    lowered = (text or "").lower()
-
-    matches_faq = any(
-        word in lowered
-        for faq in FAQS
-        for word in faq["keywords"]
-    )
-    if matches_faq:
-        return False
-
-    try:
-        return coach_core.knowledge_gap_detector(text)
-    except Exception:
-        # Part 1's knowledge base is optional; without it we cannot judge.
-        return False
 
 
 # How sure the knowledge base must be before we answer a customer without any
@@ -137,13 +233,15 @@ def is_knowledge_gap(text):
 # article to an agent: putting an answer straight in front of a customer needs
 # more confidence than putting one in front of a human who can overrule it.
 # Measured matches ran 0.596-0.711, so 0.65 keeps only the strong half.
-AUTO_RESOLVE_THRESHOLD = 0.65
 
 
 # How long we have to give the customer a FIRST reply, by how risky the
 # conversation looks. An angry customer waiting fifteen minutes is a different
 # problem from a calm one waiting four hours, so one flat target would be
 # either far too tight or meaningless.
+# The reply language a case defaults to. Analysis is always English.
+DEFAULT_LANGUAGE = languages.DEFAULT_LANGUAGE
+
 SLA_TARGET_MINUTES = {"high": 15, "medium": 60, "low": 240}
 DEFAULT_SLA_MINUTES = 60          # when we have no risk reading yet
 
@@ -189,6 +287,12 @@ CREATE INDEX IF NOT EXISTS cases_opened ON cases(opened_at);
 # them applied by hand -- guarded, because ALTER TABLE has no IF NOT EXISTS.
 MIGRATIONS = [
     ("owner", "ALTER TABLE cases ADD COLUMN owner TEXT"),
+    # owner is the AGENT working a case. Until now nothing recorded who
+    # RAISED it, which is the one thing "their own tickets" needs to know.
+    ("customer", "ALTER TABLE cases ADD COLUMN customer TEXT"),
+    ("subject", "ALTER TABLE cases ADD COLUMN subject TEXT"),
+    ("category", "ALTER TABLE cases ADD COLUMN category TEXT"),
+    ("updated_at", "ALTER TABLE cases ADD COLUMN updated_at TEXT"),
 ]
 
 
@@ -197,6 +301,11 @@ def apply_migrations(conn):
     for column, statement in MIGRATIONS:
         if column not in have:
             conn.execute(statement)
+
+    # After the columns exist, not inside MIGRATIONS -- that list is pairs of
+    # (column, ALTER), and an index is neither.
+    conn.execute("CREATE INDEX IF NOT EXISTS cases_customer "
+                 "ON cases(customer)")
 
 
 def connect():
@@ -211,6 +320,14 @@ def connect():
 # test suite repoints the path after import -- so hand them the factory, not
 # the path.
 auth.configure(connect)
+actions.configure(connect)
+pipeline.configure(
+    now_iso=lambda: now_iso(),
+    record_proposals=lambda sess: record_proposals(sess),
+    # Never a fresh model call: this is what is used when the model could not
+    # write the handoff itself.
+    handoff_fallback=lambda lang: ui_strings_cached(lang).get(
+        "handoff.escalated", UI_STRINGS["handoff.escalated"]))
 metering.configure(connect)
 
 # Every Gemini call the engine makes now reports its token count here. The
@@ -222,8 +339,59 @@ def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
         conn.executescript(auth.SCHEMA)
+        auth.apply_migrations(conn)
+        conn.executescript(actions.SCHEMA)
+        conn.executescript(FAQ_MISS_SCHEMA)
         conn.executescript(metering.SCHEMA)
         apply_migrations(conn)
+
+
+# lead is gone, folded into admin. An account still holding it would fail
+# every guard and be unable to sign in anywhere, so it is moved rather than
+# left stranded. priya moves too: the demo expects her to be the customer,
+# and she owns no cases, so nothing follows her across.
+RETIRED_ROLES = {"lead": "admin"}
+DEMO_ROLE_FIXES = {"priya": "customer"}
+
+
+def migrate_retired_roles():
+    """Move accounts off roles that no longer exist. Returns what it moved."""
+    moved = []
+    for row in auth.list_users():
+        username, role = row["username"], row["role"]
+        wanted = RETIRED_ROLES.get(role) or (
+            DEMO_ROLE_FIXES.get(username) if role != DEMO_ROLE_FIXES.get(username)
+            else None)
+        if not wanted or wanted == role:
+            continue
+        try:
+            auth.set_role(username, wanted)
+            moved.append((username, role, wanted))
+        except ValueError:
+            pass          # a role we cannot set is not worth failing boot over
+    return moved
+
+
+def backfill_resolution_modes():
+    """Give older cases the resolution_mode they were closed under.
+
+    Runs once at startup and is idempotent -- a row that already has the
+    field is left alone, so this costs nothing on every boot after the first.
+    Without it the dashboard would show a split bar covering only the cases
+    saved since the feature shipped, which reads as "AI did nothing until
+    last Tuesday" rather than as missing data.
+    """
+    filled = 0
+    for case in load_cases():
+        if case.get("resolution_mode") is not None:
+            continue
+        mode = resolution_mode_for(case)
+        if mode is None:
+            continue                  # nothing was ever sent on this one
+        case["resolution_mode"] = mode
+        save_case(case)
+        filled += 1
+    return filled
 
 
 def migrate_from_json():
@@ -261,7 +429,8 @@ def migrate_from_json():
 def _row_values(case):
     return (case.get("id"), case.get("status"), case.get("escalation_risk"),
             case.get("sentiment"), case.get("opened_at"), case.get("closed_at"),
-            case.get("owner"), json.dumps(case))
+            case.get("owner"), case.get("customer"), case.get("subject"),
+            case.get("category"), case.get("updated_at"), json.dumps(case))
 
 
 def save_case(case):
@@ -272,11 +441,13 @@ def save_case(case):
     """
     if not case.get("id"):
         return
+    case["updated_at"] = now_iso()      # "Last updated", for the ticket list
     with connect() as conn:
         conn.execute("""
             INSERT INTO cases (id, status, escalation_risk, sentiment,
-                               opened_at, closed_at, owner, data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                               opened_at, closed_at, owner, customer,
+                               subject, category, updated_at, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 escalation_risk=excluded.escalation_risk,
@@ -284,6 +455,10 @@ def save_case(case):
                 opened_at=excluded.opened_at,
                 closed_at=excluded.closed_at,
                 owner=excluded.owner,
+                customer=excluded.customer,
+                subject=excluded.subject,
+                category=excluded.category,
+                updated_at=excluded.updated_at,
                 data=excluded.data
         """, _row_values(case))
 
@@ -309,8 +484,9 @@ def save_cases(cases):
         conn.execute("DELETE FROM cases")
         conn.executemany("""
             INSERT INTO cases (id, status, escalation_risk, sentiment,
-                               opened_at, closed_at, owner, data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                               opened_at, closed_at, owner, customer,
+                               subject, category, updated_at, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [_row_values(c) for c in cases if c.get("id")])
 
 
@@ -329,6 +505,22 @@ def now_iso():
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def brand_line():
+    """The product name for the terminal banner.
+
+    A console that cannot encode Devanagari would raise rather than print,
+    and a banner is not worth failing a start-up over, so it falls back to
+    the Latin half of the name.
+    """
+    name = "सेतु · Setu"
+    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        name.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return "Setu"
+    return name
+
+
 def signed_in_username():
     """The current user's name, or None outside a request.
 
@@ -341,6 +533,155 @@ def signed_in_username():
         return None          # no request context -- tests, or a CLI command
 
 
+RESOLUTION_MODES = ("ai_autonomous", "hybrid", "human")
+
+# How close a sent reply has to be to the draft we offered before we call it
+# the draft. Chosen by the brief; it is a ratio over the whole string, so an
+# agent who keeps the shape and swaps a sentence still lands above it, while
+# somebody who types their own answer does not.
+HYBRID_SIMILARITY = 0.60
+
+
+def similarity(left, right):
+    """0.0-1.0 on two pieces of text, case and whitespace insensitive."""
+    if not left or not right:
+        return 0.0
+    return SequenceMatcher(None, " ".join(str(left).lower().split()),
+                           " ".join(str(right).lower().split())).ratio()
+
+
+def outgoing_sources(case):
+    """Who composed each outgoing message on this case.
+
+    Messages written from now on carry `source` on them, set at the moment
+    they were sent, which is the only time anybody actually knows. Older ones
+    predate the field, so it is INFERRED here by the same rules the live path
+    applies -- a reply that closely matches the draft we offered was worked
+    from that draft. That is what makes the backfill and the live value the
+    same number rather than two different definitions wearing one name.
+    """
+    auto = (case.get("auto_reply") or {}).get("reply", "")
+    suggestion = case.get("suggestion") or ""
+
+    sources = []
+    for message in case.get("messages", []):
+        if message.get("speaker") != "agent":
+            continue                      # only outgoing messages have an author
+
+        recorded = message.get("source")
+        if recorded == SYSTEM_SOURCE:
+            continue                      # a notice, not anybody's reply
+        if recorded in ("ai", "hybrid", "human"):
+            sources.append(recorded)
+            continue
+
+        text = message.get("text", "")
+        if auto and similarity(text, auto) > 0.98:
+            sources.append("ai")          # this is the deflection itself
+        elif similarity(text, suggestion) > HYBRID_SIMILARITY:
+            sources.append("hybrid")
+        else:
+            sources.append("human")
+
+    return sources
+
+
+def resolution_mode_for(case):
+    """Which of the three modes closed this case, or None if nothing was sent.
+
+    A case nobody has replied to yet has no resolver, and guessing one would
+    put a case in the split bar that nobody has worked.
+    """
+    sources = outgoing_sources(case)
+    if not sources:
+        return None
+
+    if all(s == "ai" for s in sources):
+        return "ai_autonomous"
+    if all(s == "human" for s in sources):
+        return "human"
+    # Everything else had a person AND the coach in it: a used draft, or a
+    # deflection an agent later followed up by hand. Neither "AI end to end"
+    # nor "a human wrote every word" is true of those, and calling them
+    # either one would overstate exactly the number this exists to report.
+    return "hybrid"
+
+
+CHANNELS = ("typed", "voice")
+
+# A notice written by Setu itself -- "your message is safe, a person will
+# reply" -- rather than by the model or by an agent. It must not count as
+# anybody handling the case, and it does not stop the first-response clock.
+SYSTEM_SOURCE = "system"
+
+
+def read_channel(body):
+    """How the caller says this message was entered. Anything unrecognised is
+    treated as typed -- the transcript should never claim a message was
+    dictated on the strength of a value we do not know."""
+    wanted = (body or {}).get("channel", "typed")
+    return wanted if wanted in CHANNELS else "typed"
+
+
+def may_use_write_actions():
+    """Whether this session may arm, or approve, a write action.
+
+    A rank floor, so a customer -- who sits below every staff role -- can
+    never reach it whatever the checkbox in their browser says. The check
+    lives here rather than being repeated at each call site, because a write
+    action guarded in three places out of four is not guarded.
+    """
+    return (current_user.is_authenticated
+            and current_user.at_least("admin"))
+
+
+def record_proposals(session):
+    """Write every write the model just asked for into the audit trail.
+
+    Called on the customer turn, before the agent is shown anything. An
+    identical proposal already waiting on this case is not duplicated -- the
+    model re-asks for the same refund on every turn of a conversation that
+    needs one, and a queue of eleven identical cards is a way of making sure
+    nobody reads any of them.
+    """
+    if not session.case_id:
+        return
+
+    waiting = actions.pending_for_case(session.case_id)
+    known = {(p["action"], json.dumps(p["args"], sort_keys=True))
+             for p in waiting}
+
+    for fact in session.facts or []:
+        if not fact.get("proposed"):
+            continue
+        key = (fact["name"], json.dumps(fact.get("args") or {}, sort_keys=True))
+        if key in known:
+            continue
+        known.add(key)
+        actions.propose(session.case_id, signed_in_username(),
+                        fact["name"], fact.get("args") or {},
+                        reason=session.state.key_issue or None)
+
+
+def claiming_username():
+    """Who, if anyone, should be recorded as the OWNER of the case in hand.
+
+    "Owner" means the agent working it, and only an agent can be one. The
+    portal runs the same pipeline signed in as the CUSTOMER, so without this
+    every ticket a customer raised would be stamped with their own name --
+    and may_see_case() would then hide it from every agent, because the owner
+    is neither empty nor theirs. The ticket would be raised and instantly
+    unreachable.
+    """
+    who = signed_in_username()      # None outside a request, as in the tests
+    if who is None:
+        return None
+    try:
+        return who if current_user.at_least("agent") else None
+    except (RuntimeError, AttributeError):
+        return None
+
+
 def may_see_case(case):
     """Whether the signed-in user is allowed to open this one case.
 
@@ -349,7 +690,7 @@ def may_see_case(case):
     """
     if not current_user.is_authenticated:
         return False
-    if current_user.at_least("lead"):
+    if current_user.at_least("admin"):
         return True
     owner = case.get("owner")
     return owner is None or owner == current_user.username
@@ -358,6 +699,12 @@ def may_see_case(case):
 # ==========================================================================
 # The conversation currently open
 # ==========================================================================
+# One writer at a time for the case store. Every persist() is a few
+# milliseconds of read-modify-write, so serialising them costs nothing and
+# stops two of them allocating the same case id.
+STORE_LOCK = threading.RLock()
+
+
 class LiveSession:
     """The one conversation an agent is working on right now.
 
@@ -371,6 +718,31 @@ class LiveSession:
     def reset(self):
         self.case_id = None          # assigned on the first message
         self.owner = None            # the agent it belongs to
+        # Who RAISED it, and how they described it. Set by the portal; the
+        # console leaves them empty because an agent-side case has no
+        # customer account behind it.
+        self.customer = None
+        self.subject = ""
+        self.category = ""
+        # Where the ticket came from: "form", or "tag:<id>" for a Common
+        # issues shortcut -- so the analytics can say which tags earn a place.
+        self.origin = ""
+        # Who is working the case while it is open: "ai" or "human". Older
+        # cases have no value, which reads as "human" -- they were all worked
+        # by people, and nothing already in the queue may vanish from it.
+        self.handler = ""
+        # True from the moment a customer message is saved until the
+        # assistant has answered it. The chat shows "typing" while it is set.
+        self.ai_pending = False
+        # How long each model step took on the last turn, in ms. Kept on the
+        # case so a slow week can be found later, not just in a rotated log.
+        self.last_timings = {}
+        # The latest message's severity: {"level", "score", "reasons"}.
+        self.severity = {}
+        # When and why the assistant handed this case to a person.
+        self.handover = None
+        # The language the REPLY is written in. Analysis stays English.
+        self.language = DEFAULT_LANGUAGE
         self.opened_at = None
         self.state = coach_core.ConversationState()
         self.last_customer_message = ""
@@ -396,22 +768,56 @@ class LiveSession:
         return self._coach
 
     # -- persistence ------------------------------------------------------
+    def real_calls(self):
+        """How many model calls this case has actually made.
+
+        Read from the metering table instead of counted by hand. Every call
+        goes through _call_model or report_usage, both of which record a row,
+        so this cannot miss the tool-calling loop or the embeddings the way
+        the manual counter did -- it was showing 2 for a turn that made 7.
+
+        A case saved before metering existed has no rows; that falls back to
+        whatever it stored rather than rewriting its history to zero.
+        """
+        if not self.case_id:
+            return self.calls
+        try:
+            counted = metering.for_case(self.case_id)["calls"]
+        except Exception:
+            return self.calls          # metering must never break a turn
+        return counted or self.calls
+
     def as_case(self, status="pending", closed_at=None):
-        return {
+        case = {
             "id": self.case_id,
             "owner": self.owner,
+            "customer": self.customer,
+            "subject": self.subject,
+            "category": self.category,
+            "origin": self.origin,
+            "handler": self.handler,
+            "ai_pending": self.ai_pending,
+            "perf": self.last_timings,
+            "severity": (self.severity or {}).get("level"),
+            "severity_score": (self.severity or {}).get("score"),
+            "severity_reasons": (self.severity or {}).get("reasons") or [],
+            "handover": self.handover,
+            "language": self.language,
             "opened_at": self.opened_at,
             "first_response_at": self.first_response_at,
             "closed_at": closed_at,
             "status": status,
             "turns": len(self.state.history),
-            "calls": self.calls,
+            "calls": self.real_calls(),
             "sentiment": self.state.sentiment,
             "urgency": self.state.urgency,
             "escalation_risk": self.state.escalation_risk,
             "frustration": self.state.frustration,
             "trend": self.state.trend,
             "key_issue": self.state.key_issue,
+            "intent": self.state.intent,
+            "intent_confidence": self.state.intent_confidence,
+            "emotion": self.state.emotion,
             "trajectory": list(self.trajectory),
             # The detail view shows these, so they have to be saved with the
             # case -- previously they lived only in memory and were lost the
@@ -424,10 +830,26 @@ class LiveSession:
             "facts": list(self.facts),
             "auto_reply": self.auto_reply,
             "messages": [
-                {"speaker": m.speaker, "text": m.text}
+                {"speaker": m.speaker, "text": m.text,
+                 "source": getattr(m, "source", "human"),
+                 "channel": getattr(m, "channel", "typed"),
+                 "author": getattr(m, "author", ""),
+                 # Carried through the save so a case that is opened, worked
+                 # on and saved again does not throw away a translation we
+                 # have already paid for.
+                 "gloss_en": getattr(m, "gloss_en", ""),
+                 # Per message: the language it is in, and -- for a
+                 # customer's -- what the analysis read in it.
+                 "language": getattr(m, "language", ""),
+                 "analysis": getattr(m, "analysis", {}) or {}}
                 for m in self.state.history
             ],
         }
+        # Derived, never set by hand, so it cannot drift from the messages it
+        # describes. Computed on every save rather than once at close: a case
+        # that reopens and gets a human reply has genuinely changed hands.
+        case["resolution_mode"] = resolution_mode_for(case)
+        return case
 
     def persist(self, status="pending", closed_at=None, reopen=False):
         """Insert or update this conversation in cases.json.
@@ -437,13 +859,20 @@ class LiveSession:
         pending -- saving the case for any other reason (a reset, an agent
         reply) must not quietly undo a deflection.
         """
+        # Serialised. Case ids are allocated by reading the store, so two
+        # tickets raised at the same moment -- more likely now the AI runs on
+        # worker threads -- could otherwise both be handed SC-2014.
+        with STORE_LOCK:
+            return self._persist(status, closed_at, reopen)
+
+    def _persist(self, status, closed_at, reopen):
         cases = load_cases()
 
         if self.case_id is None:
             self.case_id = next_case_id(cases)
             self.opened_at = now_iso()
             if self.owner is None:
-                self.owner = signed_in_username()
+                self.owner = claiming_username()
 
         # Whatever this request spends from here on belongs to this case.
         metering.bill_to(self.case_id)
@@ -466,6 +895,15 @@ class LiveSession:
                 if keep_closed and status == "pending":
                     record["status"] = was
                     record["closed_at"] = case.get("closed_at")
+
+                # The customer owns these, not the console. as_case() rebuilds
+                # the row from session state, which has never seen a rating --
+                # so without this an agent reopening a rated case and typing
+                # one line would silently delete the rating.
+                for field in CUSTOMER_FIELDS:
+                    if field in case:
+                        record[field] = case[field]
+
                 cases[index] = record
                 break
         else:
@@ -488,7 +926,20 @@ class LiveSession:
         # An unowned case -- one from before accounts existed -- is claimed by
         # whoever opens it. Otherwise those cases would belong to nobody and
         # no agent could ever pick them up again.
-        self.owner = case.get("owner") or signed_in_username()
+        self.owner = case.get("owner") or claiming_username()
+        self.customer = case.get("customer")
+        self.subject = case.get("subject") or ""
+        self.category = case.get("category") or ""
+        self.origin = case.get("origin") or ""
+        self.handler = case.get("handler") or ""
+        self.ai_pending = bool(case.get("ai_pending"))
+        self.last_timings = dict(case.get("perf") or {})
+        self.severity = ({"level": case.get("severity"),
+                          "score": case.get("severity_score"),
+                          "reasons": case.get("severity_reasons") or []}
+                         if case.get("severity") else {})
+        self.handover = case.get("handover")
+        self.language = case.get("language") or DEFAULT_LANGUAGE
         self.opened_at = case.get("opened_at")
         self.first_response_at = case.get("first_response_at")
         self.trajectory = list(case.get("trajectory") or [])
@@ -501,7 +952,13 @@ class LiveSession:
 
         for message in case.get("messages", []):
             self.state.add_message(message.get("speaker", "customer"),
-                                   message.get("text", ""))
+                                   message.get("text", ""),
+                                   message.get("source", "human"),
+                                   message.get("channel", "typed"),
+                                   message.get("author", ""),
+                                   message.get("gloss_en", ""),
+                                   message.get("language", ""),
+                                   message.get("analysis") or {})
 
         # The agent replies to the last thing the CUSTOMER said, which is not
         # necessarily the last line of the transcript.
@@ -516,12 +973,44 @@ class LiveSession:
         self.state.frustration = case.get("frustration", 0)
         self.state.trend = case.get("trend", "unknown")
         self.state.key_issue = case.get("key_issue", "")
+        # Cases saved before intent extraction have none of these, so they
+        # fall back to empty and the panel shows a dash rather than stale
+        # readings from whatever was open previously.
+        self.state.intent = case.get("intent", "")
+        self.state.intent_confidence = case.get("intent_confidence")
+        self.state.emotion = case.get("emotion", "")
 
     def as_dict(self):
+        # The severity and the reasons behind it, for the Live Intelligence
+        # panel. An older case has none stored; it is read off the same
+        # readings the queue uses, so the panel and the queue always agree.
+        if self.severity:
+            severity = dict(self.severity)
+        elif self.state.escalation_risk not in (None, "", "unknown"):
+            level, score, reasons = severity_for({
+                "escalation_risk": self.state.escalation_risk,
+                "frustration": self.state.frustration})
+            severity = {"level": level, "score": score, "reasons": reasons}
+        else:
+            severity = {}
+
         return {
             "case_id": self.case_id,
+            "severity": severity,
+            "handover": self.handover,
+            "handler": self.handler,
             "history": [
-                {"speaker": m.speaker, "text": m.text}
+                {"speaker": m.speaker, "text": m.text,
+                 "channel": getattr(m, "channel", "typed"),
+                 "source": getattr(m, "source", "human"),
+                 "author": getattr(m, "author", ""),
+                 # non-English customer text the agent may need glossed
+                 "foreign": (m.speaker == "customer"
+                             and languages.detect_language(m.text)
+                             not in (None, "en")),
+                 # For the agent only -- the customer serialiser never names it.
+                 "language": getattr(m, "language", ""),
+                 "analysis": getattr(m, "analysis", {}) or {}}
                 for m in self.state.history
             ],
             "sentiment": self.state.sentiment,
@@ -530,8 +1019,11 @@ class LiveSession:
             "frustration": self.state.frustration,
             "trend": self.state.trend,
             "key_issue": self.state.key_issue,
+            "intent": self.state.intent,
+            "intent_confidence": self.state.intent_confidence,
+            "emotion": self.state.emotion,
             "trajectory": self.trajectory,
-            "calls": self.calls,
+            "calls": self.real_calls(),
             "model": self._coach.model if self._coach else None,
             "last_feedback": self.last_feedback,
             "last_suggestion": self.last_suggestion,
@@ -541,6 +1033,10 @@ class LiveSession:
             "ratings": self.ratings,
             "allow_writes": self.allow_writes,
             "auto_reply": self.auto_reply,
+            # Proposals and completed runs for this case. Read from the audit
+            # table rather than kept on the session, so reopening a case from
+            # the dashboard shows the same history the trail does.
+            "actions": actions.for_case(self.case_id) if self.case_id else [],
         }
 
 
@@ -617,57 +1113,179 @@ def sla_for(case, now=None):
     return result
 
 
-def try_auto_resolve(text):
-    """Answer the customer outright when we are confident enough to.
+# ==========================================================================
+# Customer satisfaction
+# ==========================================================================
+# A rating stays editable for a day. Long enough that somebody who rated in
+# irritation and then got a good outcome can correct it; short enough that the
+# history stops moving under the dashboard.
+CSAT_EDIT_HOURS = 24
 
-    Two conditions, both required:
-      1. the conversation is calm (escalation risk low), and
-      2. semantic search found a strongly matching help article.
+# Written against the stored row by the rating endpoint, never by the live
+# session. persist() copies them forward; see the note there.
+CUSTOMER_FIELDS = ("csat_score", "csat_comment", "csat_at")
 
-    A keyword match never qualifies -- its score is a word count, not a
-    confidence, and it is the weaker matcher.
+# Below this many ratings an average is reported WITH its sample size and
+# rendered faintly. Ten is not a significance threshold -- it is the point
+# below which a single rating moves the mean by more than a tenth of a star,
+# which is the resolution the tile is displayed at.
+CSAT_SMALL_SAMPLE = 10
+
+CLOSED = ("resolved", "auto_resolved")
+
+
+def record_csat(case, score, comment="", now=None):
+    """Attach a customer rating to a case.
+
+    Returns (case, None) or (None, why). The rules live here rather than in
+    the route so the portal, the chat view and the test suite are all held to
+    the same ones.
     """
-    if session.state.escalation_risk != "low":
-        return None
+    now = now or datetime.now(UTC)
 
-    article = coach_core.find_kb_article(text)
-    if not article or article.get("how") != "semantic":
-        return None
-    if article.get("score", 0) < AUTO_RESOLVE_THRESHOLD:
-        return None
+    if case.get("status") not in CLOSED:
+        return None, "That case is not resolved yet."
 
-    reply = session.coach.suggest_reply(
-        text, session.state.history,
-        analysis={
-            "sentiment": session.state.sentiment,
-            "urgency": session.state.urgency,
-            "key_issue": session.state.key_issue,
-        },
-        facts=session.facts,
+    # Parsed through str() so a float like 2.5 raises rather than truncating
+    # to 2. Half a star is not a rating this scale offers, and quietly
+    # rounding it records something the customer did not say.
+    if isinstance(score, bool):
+        return None, "A rating must be a whole number of stars."
+    try:
+        value = int(str(score).strip())
+    except (TypeError, ValueError):
+        return None, "A rating must be a whole number of stars."
+    if not 1 <= value <= 5:
+        return None, "A rating must be between 1 and 5 stars."
+
+    # csat_at anchors the edit window and is NOT moved by a later edit --
+    # otherwise each change would buy another day and the window would never
+    # close.
+    first = parse_time(case.get("csat_at"))
+    if first is not None:
+        hours = (now - first).total_seconds() / 3600
+        if hours > CSAT_EDIT_HOURS:
+            return None, (f"This rating can no longer be changed. Ratings stay "
+                          f"open for {CSAT_EDIT_HOURS} hours.")
+    else:
+        case["csat_at"] = now.isoformat(timespec="seconds")
+
+    case["csat_score"] = value
+    case["csat_comment"] = (comment or "").strip()[:280]
+    return case, None
+
+
+def rated(cases):
+    return [c for c in cases if isinstance(c.get("csat_score"), int)]
+
+
+def csat_summary(cases):
+    """The CSAT tile: an average, and how much of the closed work it covers."""
+    closed = [c for c in cases if c.get("status") in CLOSED]
+    scores = [c["csat_score"] for c in rated(closed)]
+
+    return {
+        "average": round(sum(scores) / len(scores), 2) if scores else None,
+        "count": len(scores),
+        "eligible": len(closed),
+        "response_rate": round(100 * len(scores) / len(closed)) if closed else 0,
+        "small_sample": len(scores) < CSAT_SMALL_SAMPLE,
+    }
+
+
+def csat_by_mode(cases):
+    """Average CSAT per resolution mode -- the comparison worth having.
+
+    Each mode carries its own sample size, because "AI 4.8 vs human 4.1" means
+    nothing until you know whether that is 40 ratings or two.
+    """
+    out = []
+    for mode in RESOLUTION_MODES:
+        scores = [c["csat_score"] for c in rated(cases)
+                  if (c.get("resolution_mode") or resolution_mode_for(c)) == mode]
+        out.append({
+            "mode": mode,
+            "average": round(sum(scores) / len(scores), 2) if scores else None,
+            "count": len(scores),
+            "small_sample": len(scores) < CSAT_SMALL_SAMPLE,
+        })
+    return out
+
+
+def median_first_reply(cases):
+    """Median seconds from the customer's first message to the first reply.
+
+    The median, not the mean: one case that sat overnight drags a mean far
+    enough to make a good week look bad, and the tile is meant to describe
+    the typical wait rather than the worst one.
+    """
+    waits = sorted(
+        seconds for seconds in
+        (sla_for(case).get("first_response_seconds") for case in cases)
+        if isinstance(seconds, int) and seconds >= 0
     )
-    return {"reply": reply, "topic": article["topic"],
-            "confidence": article["score"]}
+    if not waits:
+        return {"median_seconds": None, "count": 0}
+
+    middle = len(waits) // 2
+    median = (waits[middle] if len(waits) % 2
+              else (waits[middle - 1] + waits[middle]) / 2)
+    return {"median_seconds": int(median), "count": len(waits)}
 
 
-def open_rating_slot(session, grounded, topic=None):
-    """Record that a suggestion was produced, ready for a thumbs up or down."""
-    session.ratings.append({
-        "rating": None,
-        "grounded": bool(grounded),
-        "topic": topic,
-        "at": now_iso(),
-    })
+# The knowledge base's topics are the issue groups this app had before intents
+# existed. Mapping them onto the intent vocabulary means one category axis
+# rather than two that nearly agree.
+TOPIC_AS_INTENT = {
+    "refund": "Refund status",
+    "recharge": "Recharge failed",
+    "delivery": "Order & delivery",
+    "network": "Network issue",
+    "account": "Account & login",
+}
+UNCATEGORISED = "Uncategorised"
 
 
-def note_redactions(session):
-    """Fold the last call's redaction log into the case, without repeats."""
-    seen = {(r["kind"], r["placeholder"], r["masked"])
-            for r in session.redactions}
-    for entry in getattr(session.coach, "last_redactions", []) or []:
-        key = (entry["kind"], entry["placeholder"], entry["masked"])
-        if key not in seen:
-            seen.add(key)
-            session.redactions.append(entry)
+def category_of(case):
+    """Which bucket a case belongs in, best source first."""
+    intent = case.get("intent")
+    if intent:
+        return intent
+
+    # Older cases have no intent, but a deflection or a rated suggestion
+    # recorded which help article matched, which is the same question asked
+    # a different way.
+    topic = (case.get("auto_reply") or {}).get("topic")
+    if not topic:
+        topic = next((r.get("topic") for r in reversed(case.get("ratings") or [])
+                      if r.get("topic")), None)
+    return TOPIC_AS_INTENT.get(topic, UNCATEGORISED)
+
+
+def category_volume(cases):
+    """Ticket count per category, biggest first."""
+    counts = {}
+    for case in cases:
+        counts[category_of(case)] = counts.get(category_of(case), 0) + 1
+
+    total = sum(counts.values())
+    rows = [{"category": name, "count": n,
+             "share": round(100 * n / total) if total else 0}
+            for name, n in counts.items()]
+    # Biggest first, and Uncategorised last whatever its size -- it is the
+    # absence of an answer, not one of the answers.
+    rows.sort(key=lambda r: (r["category"] == UNCATEGORISED, -r["count"],
+                             r["category"]))
+    return {"rows": rows, "total": total}
+
+
+
+
+
+
+
+
+
 
 
 @app.before_request
@@ -680,8 +1298,40 @@ def open_billing_account():
     metering.begin(signed_in_username())
 
 
+# What a person is told when a request fails. The exception itself -- model
+# names, "RemoteProtocolError", stack-trace-looking text -- is for the server
+# log and nobody else.
+SOFT_ERRORS = {
+    "model": ("Our assistant could not answer just now. Please try again in "
+              "a moment."),
+    "other": "Something went wrong on our side. Please try again.",
+}
+
+log = logging.getLogger("setu")
+
+# Without a handler these loggers write nowhere, and the timings Issue 4 asked
+# for would be computed and thrown away. One line per event, to the console
+# the server already prints its banner to.
+if not logging.getLogger("setu").handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s  %(message)s", "%H:%M:%S"))
+    logging.getLogger("setu").addHandler(_handler)
+    logging.getLogger("setu").setLevel(logging.INFO)
+
+
 def failure(error, status=502):
-    return jsonify({"ok": False, "error": str(error)}), status
+    """A failed request: logged in full, answered softly.
+
+    The reference is in both places, so a customer or an agent who reports
+    "it said ref 3fa9c1" leads the dev team straight to the log line.
+    """
+    ref = secrets.token_hex(3)
+    log.error("request failed [ref %s] %s %s: %s: %s", ref,
+              request.method, request.path, type(error).__name__, error,
+              exc_info=(type(error), error, error.__traceback__))
+    kind = "model" if isinstance(error, coach_core.ModelUnavailable) else "other"
+    return jsonify({"ok": False, "error": SOFT_ERRORS[kind], "ref": ref}), status
 
 
 def over_budget():
@@ -714,7 +1364,7 @@ def login_page():
 
 # The role a page needs, so the login can tell whether sending somebody back
 # where they came from would only bounce them again.
-PAGE_ROLES = {"/dashboard": "lead", "/": "agent"}
+PAGE_ROLES = {"/dashboard": "admin", "/": "agent", "/portal": "customer"}
 
 
 def landing_for(user, wanted=""):
@@ -725,7 +1375,7 @@ def landing_for(user, wanted=""):
     would otherwise log in and land straight on "not allowed", which reads as
     the login having failed.
     """
-    home = "/dashboard" if user.at_least("lead") else "/"
+    home = user.landing
 
     wanted = (wanted or "").strip()
     # A protocol-relative "//evil.example" is a path to a browser and an open
@@ -736,22 +1386,106 @@ def landing_for(user, wanted=""):
     needed = next((role for path, role in PAGE_ROLES.items()
                    if wanted == path or wanted.startswith(path.rstrip("/") + "/")),
                   None)
-    if needed and not user.at_least(needed):
-        return home
-    return wanted
+    if needed is None:
+        return wanted
+    # The portal is audience, not seniority: an admin outranks a customer but
+    # still does not belong in the customer's workspace.
+    allowed = (user.role == "customer" if needed == "customer"
+               else user.at_least(needed))
+    return wanted if allowed else home
 
 
 @app.post("/api/login")
 def do_login():
     body = request.json or {}
-    user, why = auth.authenticate(body.get("username", ""),
-                                  body.get("password", ""))
+
+    # "email" is what the form sends; "username" is what --add-user makes and
+    # what the test suite uses. find_user() accepts either.
+    handle = body.get("email") or body.get("username", "")
+    user, why = auth.authenticate(handle, body.get("password", ""))
     if user is None:
         # 401 with a deliberately vague reason -- see auth.authenticate().
         return jsonify({"ok": False, "error": why}), 401
 
+    # The role card is a claim about which workspace you meant to open. It is
+    # checked against the account rather than trusted -- picking Admin does
+    # not make you one -- so a mismatch is a clear message instead of a
+    # confusing landing somewhere you did not expect.
+    claimed = body.get("role")
+    if claimed and claimed in auth.ROLES and claimed != user.role:
+        # The password was RIGHT, so this is a different mistake from a wrong
+        # password and gets a different answer. `role` lets the page select
+        # the right card itself, so nobody has to guess which one they are.
+        return jsonify({"ok": False, "reason": "wrong_account_type",
+                        "role": user.role, "error": (
+            f"That is a {user.role} account, not {claimed}. We have "
+            f"selected the {user.role.title()} card \u2014 sign in again.")}), 403
+
     login_user(user, remember=False, duration=None)
     return jsonify({"ok": True, "user": user.as_dict(),
+                    "next": landing_for(user, body.get("next", ""))})
+
+
+# Self-service sign-up creates a CUSTOMER. Somebody who finds the login page
+# and makes an account is a person with a problem, not a member of staff --
+# and this is what keeps the console, the dashboard, the write-action gate
+# and the exports behind an account that somebody made deliberately with
+# --add-user.
+SIGNUP_ROLE = "customer"
+
+# Letters, digits, dot, dash, underscore. create_user() lowercases and
+# strips, but it would otherwise accept a username with spaces in it, which
+# then reads badly everywhere it is displayed.
+USERNAME_SHAPE = re.compile(r"[a-z0-9._-]{3,32}")
+
+# Deliberately loose: one @, something either side, a dot in the domain. The
+# point is to catch a typo'd form, not to re-implement RFC 5322.
+EMAIL_SHAPE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+@app.post("/api/register")
+def register():
+    """Create an account from the login page, and sign it straight in.
+
+    Deliberately NOT role-selectable. The form cannot ask for a role and the
+    server does not read one if it is sent.
+    """
+    body = request.json or {}
+    username = (body.get("username") or "").strip().lower()
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    confirm = body.get("confirm") or ""
+    display = (body.get("display_name") or "").strip()
+
+    # The sign-in form asks for an EMAIL. This route used to accept one and
+    # then never store it, so an account made here could only ever sign in by
+    # username -- and "the exact credentials I just registered with" failed.
+    if not EMAIL_SHAPE.fullmatch(email):
+        return jsonify({"ok": False,
+                        "error": "Enter a valid email address."}), 400
+
+    if not USERNAME_SHAPE.fullmatch(username):
+        return jsonify({"ok": False, "error": (
+            "A username is 3-32 characters, using letters, numbers, dot, "
+            "dash or underscore.")}), 400
+
+    if password != confirm:
+        return jsonify({"ok": False,
+                        "error": "The two passwords do not match."}), 400
+
+    try:
+        auth.create_user(username, password, SIGNUP_ROLE,
+                         display_name=display or None, email=email)
+    except ValueError as why:
+        # create_user already refuses a short password and a duplicate name.
+        return jsonify({"ok": False, "error": str(why)}), 400
+
+    user, problem = auth.authenticate(username, password)
+    if user is None:
+        return jsonify({"ok": False, "error": problem}), 400
+
+    login_user(user, remember=False, duration=None)
+    return jsonify({"ok": True, "created": True, "user": user.as_dict(),
                     "next": landing_for(user, body.get("next", ""))})
 
 
@@ -770,9 +1504,979 @@ def me():
     return jsonify({"ok": True, "user": current_user.as_dict()})
 
 
-@app.get("/denied")
-def denied():
-    return send_from_directory(app.static_folder, "denied.html")
+# ==========================================================================
+# The customer's workspace
+# ==========================================================================
+# What a customer is allowed to know about their own ticket. THREE states,
+# and this is the only function that decides which -- so when the decision
+# engine lands and adds an "escalated" status, it joins the amber row here
+# and nowhere else.
+CUSTOMER_STATES = {
+    "ai_handled":      {"label": "Handled by AI", "tone": "green"},
+    "human_reviewing": {"label": "A human agent is reviewing", "tone": "amber"},
+    "resolved":        {"label": "Resolved", "tone": "grey"},
+}
+
+CATEGORIES = ["Recharge", "Refund", "Order & Delivery", "Network",
+              "Account & Login", "Billing & Payments", "App & Technical",
+              "Other"]
+
+FAQ_MISS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS faq_misses (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    at    TEXT NOT NULL,
+    who   TEXT,
+    text  TEXT NOT NULL
+);
+"""
+
+
+def record_unanswered(text, who=None):
+    """Log a question the knowledge base could not answer.
+
+    A FAQ miss raises no ticket, so it has no case to hang off -- and
+    "Questions we cannot answer" reads case["unanswered"]. Rather than invent
+    a case for something nobody raised, misses get their own small table and
+    /api/gaps merges the two. Both are the same fact: a help article somebody
+    still has to write.
+    """
+    text = (text or "").strip()
+    if not text:
+        return
+    try:
+        with connect() as conn:
+            conn.execute(
+                "INSERT INTO faq_misses (at, who, text) VALUES (?, ?, ?)",
+                (now_iso(), who, text))
+    except sqlite3.Error:
+        pass          # a logging failure must not cost the customer an answer
+
+
+def faq_misses():
+    try:
+        with connect() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT at, who, text FROM faq_misses ORDER BY id")]
+    except sqlite3.Error:
+        return []
+
+# The six Knowledge groups, mapped onto the portal's categories, so a ticket
+# raised from a FAQ card lands in the same bucket the dashboard counts.
+FAQ_CATEGORY = {
+    "recharge": "Recharge", "refund": "Refund", "delivery": "Order & Delivery",
+    "network": "Network", "account": "Account & Login", "escalate": "Other",
+    "payment": "Billing & Payments", "wrong-item": "Order & Delivery",
+    "locked": "Account & Login", "subscription": "Billing & Payments",
+    "app-crash": "App & Technical", "profile": "Account & Login",
+    "invoice": "Billing & Payments", "bulk": "Other",
+}
+
+# The console's chips and the dashboard's Knowledge groups: the original six.
+CONSOLE_FAQS = [f for f in FAQS if not f.get("portal_only")]
+
+
+def customer_status_of(case):
+    """Which of the three states the customer sees. Nothing else leaks."""
+    status = case.get("status")
+    if status == "auto_resolved":
+        return "ai_handled"
+    if status == "resolved":
+        return "resolved"
+    # Open, and the assistant is on it -- either writing a reply right now, or
+    # the one handling this conversation. Saying "a human is reviewing" while
+    # no human has been asked would be a promise nobody is keeping.
+    if case.get("handler") != "human" and (case.get("ai_pending")
+                                           or case.get("handler") == "ai"):
+        return "ai_handled"
+    return "human_reviewing"        # pending, escalated, anything open
+
+
+def as_customer_case(case, *, with_messages=False):
+    """The ONLY shape a case is ever sent to a customer in.
+
+    An allow-list, naming every field it emits, rather than a deny-list that
+    strips the forbidden ones. A deny-list leaks every field anybody adds
+    later; this fails closed. Nothing about sentiment, urgency, escalation
+    risk, gates, scores, coaching, lookups or cost can travel through here,
+    because none of them is named.
+    """
+    state = customer_status_of(case)
+    out = {
+        "id": case.get("id"),
+        "subject": case.get("subject") or (case.get("key_issue") or "Support request"),
+        "category": case.get("category") or "Other",
+        "status": state,
+        "status_label": CUSTOMER_STATES[state]["label"],
+        "status_tone": CUSTOMER_STATES[state]["tone"],
+        "updated_at": case.get("updated_at") or case.get("opened_at"),
+        "opened_at": case.get("opened_at"),
+        # Their own rating and their own words. Safe to return for the same
+        # reason their own messages are: they wrote it.
+        "rating": case.get("csat_score"),
+        "rating_comment": case.get("csat_comment") or "",
+        "can_rate": case.get("status") in CLOSED,
+        "rating_editable": rating_still_open(case),
+        "language": case.get("language") or DEFAULT_LANGUAGE,
+        # "We are writing you a reply" -- the chat shows it as typing and
+        # checks back. Says nothing about how the message was judged.
+        "ai_pending": bool(case.get("ai_pending")),
+    }
+
+    if with_messages:
+        out["messages"] = [
+            {
+                "speaker": m.get("speaker"),
+                "text": m.get("text", ""),
+                # Who the customer sees it from. An agent's own name when a
+                # person took over, so the handover is visible to them.
+                "from": ("You" if m.get("speaker") == "customer"
+                         else m.get("author")
+                         or ("AI assistant" if m.get("source") == "ai"
+                             else "Setu" if m.get("source") == SYSTEM_SOURCE
+                             else "Support agent")),
+                "is_ai": m.get("speaker") != "customer" and m.get("source") == "ai",
+                # Anything Setu itself said can be read aloud: the AI's replies
+                # and its own notices. An agent's reply is a person's words.
+                "playable": (m.get("speaker") != "customer"
+                             and m.get("source") in ("ai", SYSTEM_SOURCE)),
+                # so the thread can show a mic on a dictated message
+                "by_voice": m.get("channel") == "voice",
+                "language": m.get("language") or case.get("language") or DEFAULT_LANGUAGE,
+            }
+            for m in case.get("messages", [])
+        ]
+        # (Each message carries its own `language`; the chat page reads that
+        # to offer the interface in the language the customer is writing in.)
+    return out
+
+
+def rating_still_open(case):
+    """Whether this rating can still be given or changed.
+
+    A closed case with no rating is open for one; a rated one stays editable
+    for CSAT_EDIT_HOURS from the FIRST rating, which is the same window
+    record_csat() enforces -- this only tells the page what to draw.
+    """
+    if case.get("status") not in CLOSED:
+        return False
+    first = parse_time(case.get("csat_at"))
+    if first is None:
+        return True
+    return (datetime.now(UTC) - first).total_seconds() <= CSAT_EDIT_HOURS * 3600
+
+
+def cases_for_customer(username):
+    """Their own tickets, newest activity first."""
+    mine = [c for c in load_cases() if c.get("customer") == username]
+    mine.sort(key=lambda c: c.get("updated_at") or c.get("opened_at") or "",
+              reverse=True)
+    return mine
+
+
+def customer_case_or_none(case_id, username):
+    """One case, only if it belongs to this customer.
+
+    Callers answer a miss with 404 rather than 403: "that case exists but is
+    not yours" is itself a small leak.
+    """
+    for case in load_cases():
+        if case.get("id") == case_id and case.get("customer") == username:
+            return case
+    return None
+
+
+def scoped_session_for(case):
+    """A short-lived session holding ONE case.
+
+    The console's module-level session is a single conversation for the whole
+    process. A customer typing at the same time as an agent would land in the
+    agent's transcript. load() + persist() already bracket every turn, so a
+    per-request session is a legitimate unit of work.
+    """
+    sess = LiveSession()
+    sess.load(case)
+    return sess
+
+
+@app.get("/portal")
+@require_exact("customer")
+def portal():
+    """The customer's ticket list."""
+    return send_from_directory(app.static_folder, "portal.html")
+
+
+@app.get("/portal/chat/<case_id>")
+@require_exact("customer")
+def portal_chat(case_id):
+    """One conversation. Ownership is checked by the API the page calls."""
+    if customer_case_or_none(case_id, signed_in_username()) is None:
+        return redirect("/portal?error=not-your-ticket")
+    return send_from_directory(app.static_folder, "portal-chat.html")
+
+
+@app.get("/api/portal/tickets")
+@require_exact("customer")
+def portal_tickets():
+    me = signed_in_username()
+    return jsonify({"ok": True, "categories": CATEGORIES,
+                    "tickets": [as_customer_case(c) for c in cases_for_customer(me)]})
+
+
+def hand_to_a_person(sess, language, why, commit=None):
+    """The model could not answer. Keep the ticket and tell the customer so.
+
+    The message they wrote is already saved -- run_customer_turn persists the
+    case before the first model call -- so what is left is to stop them staring
+    at an error: a calm note in their own language, and the case routed to a
+    person instead of waiting on an assistant that is not coming.
+    """
+    # In the language of the conversation -- the one the customer is writing
+    # in -- not just the one their interface is set to.
+    language, _how = languages.reply_language(
+        sess.last_customer_message or "", previous=getattr(sess, "language", None),
+        preferred=language)
+    note = ui_strings_cached(language).get(
+        "note.assistantBusy", UI_STRINGS["note.assistantBusy"])
+    # Once is enough. Every later message on a case the model cannot reach
+    # would otherwise repeat the same apology underneath it.
+    said = [m for m in sess.state.history if m.speaker != "customer"]
+    if not (said and said[-1].source == SYSTEM_SOURCE and said[-1].text == note):
+        sess.state.add_message("agent", note, source=SYSTEM_SOURCE)
+    sess.handler = "human"
+    sess.ai_pending = False
+    # Recorded like any other handover, so the agent who finds it in the
+    # queue can see WHY it is there -- not a severity, but an outage.
+    if not sess.handover:
+        sess.handover = {"at": now_iso(), "severity": None,
+                         "why": "the assistant could not reach the model"}
+    (commit or (lambda s, **kw: s.persist(**kw)))(sess, reopen=True)
+    log.warning("case %s handed to a person: %s", sess.case_id, why)
+
+
+# ---------------------------------------------------------------------------
+# The assistant, off the request
+#
+# A customer's message is saved in the request, which then answers in
+# milliseconds. The model work -- analyse, look up, decide, draft, about 7s
+# on a good day -- happens here, on a worker thread, and the chat page polls
+# until the reply lands.
+#
+# Two writers can touch one case at once: the customer sending again while
+# the assistant is still answering the last message. So each case has a
+# lock, held only for the read at the start and the write at the end -- never
+# across a model call -- and the write re-reads the case and keeps anything
+# that arrived meanwhile. If something did arrive, the worker goes round
+# again, so the newest message is always the one answered.
+# ---------------------------------------------------------------------------
+AI_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="setu-ai")
+AI_BUSY = set()                  # case ids with a worker in flight
+_CASE_LOCKS = {}
+_CASE_LOCKS_GUARD = threading.Lock()
+
+
+def case_lock(case_id):
+    with _CASE_LOCKS_GUARD:
+        return _CASE_LOCKS.setdefault(case_id, threading.RLock())
+
+
+def find_case(case_id):
+    return next((c for c in load_cases() if c.get("id") == case_id), None)
+
+
+def start_assistant(case_id, customer, language):
+    """Run the assistant on this case. The caller has already added the id to
+    AI_BUSY under the case's lock, which is what stops two workers starting."""
+    if app.config.get("AI_INLINE"):
+        # The test suite: run it now, so a test can assert on the reply the
+        # moment the request returns instead of racing a thread.
+        _assistant_job(case_id, customer, language)
+    else:
+        AI_POOL.submit(_assistant_job, case_id, customer, language)
+
+
+def _assistant_job(case_id, customer, language):
+    began_job = time.perf_counter()
+    try:
+        with metering.attribute_to(case_id, customer):
+            while _answer_latest(case_id, language):
+                pass
+    except Exception as error:                # never leave a chat "typing"
+        log.exception("assistant job for %s failed: %s", case_id, error)
+        with case_lock(case_id):
+            AI_BUSY.discard(case_id)
+            case = find_case(case_id)
+            if case is not None and case.get("ai_pending"):
+                sess = scoped_session_for(case)
+                hand_to_a_person(sess, language, f"worker crashed: {error!r}")
+    finally:
+        log.info("assistant finished %s in %.1fs", case_id,
+                 time.perf_counter() - began_job)
+
+
+def _answer_latest(case_id, language):
+    """Answer the newest customer message once. True if another arrived while
+    this one was being answered, so the caller should go round again."""
+    with case_lock(case_id):
+        case = find_case(case_id)
+        if case is None:
+            AI_BUSY.discard(case_id)
+            return False
+        sess = scoped_session_for(case)
+        seen = len(case.get("messages", []))
+        text = sess.last_customer_message
+
+    outcome = {"arrived": False}
+
+    def commit(s, **kwargs):
+        with case_lock(case_id):
+            fresh = find_case(case_id) or {}
+            arrived = [m for m in fresh.get("messages", [])[seen:]
+                       if m.get("speaker") == "customer"]
+            for m in arrived:
+                s.state.add_message("customer", m.get("text", ""),
+                                    channel=m.get("channel", "typed"))
+            if arrived:
+                # The customer wrote again while this was being answered.
+                # Keep their message, leave the case open, and go round.
+                s.last_customer_message = arrived[-1].get("text", "")
+                s.ai_pending = True
+                kwargs = {"reopen": True}
+            else:
+                AI_BUSY.discard(case_id)
+            s.persist(**kwargs)
+            outcome["arrived"] = bool(arrived)
+
+    began = time.perf_counter()
+    try:
+        result = pipeline.respond_to_customer(sess, text, language=language,
+                                              commit=commit)
+        log.info("case %s answered in %.1fs %s", case_id,
+                 time.perf_counter() - began, getattr(result, "timings", {}))
+    except Exception as error:
+        hand_to_a_person(sess, language, f"{type(error).__name__}: {error}",
+                         commit=commit)
+    return outcome["arrived"]
+
+
+def resume_waiting_assistants():
+    """After a restart, answer anything that was waiting when it stopped.
+
+    AI_BUSY lives in memory, so a restart mid-reply would otherwise leave
+    that chat showing "typing" for ever.
+    """
+    for case in load_cases():
+        if case.get("ai_pending") and case.get("customer"):
+            case_id = case["id"]
+            with case_lock(case_id):
+                if case_id in AI_BUSY:
+                    continue
+                AI_BUSY.add(case_id)
+            start_assistant(case_id, case["customer"],
+                            case.get("language") or DEFAULT_LANGUAGE)
+
+
+@app.post("/api/portal/tickets")
+@require_exact("customer")
+def portal_new_ticket():
+    """Raise a ticket, then run the same pipeline the console runs."""
+    body = request.json or {}
+    subject = (body.get("subject") or "").strip()
+    category = (body.get("category") or "").strip()
+    description = (body.get("description") or "").strip()
+
+    if not subject:
+        return jsonify({"ok": False, "error": "A subject is required."}), 400
+    if not description:
+        return jsonify({"ok": False, "error": "Tell us what happened."}), 400
+    if category not in CATEGORIES:
+        category = "Other"
+
+    refused = over_budget()
+    if refused:
+        return refused
+
+    me = signed_in_username()
+    language = getattr(current_user, "preferred_language", DEFAULT_LANGUAGE)
+    sess = LiveSession()
+    sess.customer = me
+    sess.subject = subject[:120]
+    sess.category = category
+    sess.language = language
+    tag = body.get("tag")
+    sess.origin = (f"tag:{tag}" if any(f["id"] == tag for f in FAQS)
+                   else "form")
+    # The assistant takes a new ticket first, and hands it to a person when it
+    # should. Older cases have no handler and stay with people.
+    sess.handler = "ai"
+
+    # Saved and answered in milliseconds. The assistant runs afterwards, so a
+    # slow or unreachable model can no longer hold the customer's ticket up.
+    began = time.perf_counter()
+    pipeline.record_customer_message(sess, description,
+                                     channel=read_channel(body))
+    with case_lock(sess.case_id):
+        AI_BUSY.add(sess.case_id)
+    start_assistant(sess.case_id, me, language)
+    log.info("ticket %s created in %dms", sess.case_id,
+             (time.perf_counter() - began) * 1000)
+
+    return jsonify({"ok": True,
+                    "ticket": as_customer_case(find_case(sess.case_id) or {},
+                                               with_messages=True)})
+
+
+@app.get("/api/portal/cases/<case_id>")
+@require_exact("customer")
+def portal_case(case_id):
+    case = customer_case_or_none(case_id, signed_in_username())
+    if case is None:
+        return jsonify({"ok": False, "error": f"No ticket {case_id}."}), 404
+    return jsonify({"ok": True, "ticket": as_customer_case(case, with_messages=True)})
+
+
+@app.get("/api/portal/languages")
+@require_exact("customer")
+def portal_languages():
+    """The picker's options, each in its own script."""
+    selected = languages.normalise(
+        getattr(current_user, "preferred_language", DEFAULT_LANGUAGE))
+    return jsonify({"ok": True,
+                    "default": DEFAULT_LANGUAGE,
+                    "selected": selected,
+                    # The page paints from this rather than from the markup,
+                    # so a reload comes back in the chosen language.
+                    "strings": ui_strings(selected),
+                    "languages": [
+                        {"code": code, "native": meta["native"],
+                         "english": meta["english"], "speech": meta["speech"]}
+                        for code, meta in languages.LANGUAGES.items()
+                    ]})
+
+
+@app.post("/api/portal/language")
+@require_exact("customer")
+def portal_set_language():
+    """Remember the language this customer wants to be answered in."""
+    wanted = (request.json or {}).get("language", "")
+    if not languages.is_supported(wanted):
+        return jsonify({"ok": False, "error": "Unknown language."}), 400
+    auth.set_language(signed_in_username(), wanted)
+    # The page has already repainted from its own seed or cache by the time
+    # this answers; the catalogue here is what it keeps for the ones it could
+    # not know in advance.
+    return jsonify({"ok": True, "language": wanted,
+                    "native": languages.native_name(wanted),
+                    "speech": languages.speech_code(wanted),
+                    "strings": ui_strings(wanted)})
+
+
+# ---------------------------------------------------------------------------
+# The customer-side string catalogue
+#
+# The source of truth for what a customer reads is app/static/i18n.js; this is
+# the same English, kept here because the translation happens server-side and
+# the model needs the source text. A test asserts the two never drift.
+#
+# Only the CHROME is in here. Ticket ids, order and refund ids, amounts, dates
+# and anything the customer wrote themselves are never translated, so they are
+# not keys and can never accidentally become ones.
+# ---------------------------------------------------------------------------
+UI_STRINGS = {
+    "header.subtitle": "Customer portal",
+    "language": "Language",
+    "signOut": "Sign out",
+    "voice.button": "Voice",
+    "voice.turnOff": "Turn voice controls off",
+    "voice.turnOn": "Turn voice controls on",
+    "voice.isOff": "Voice is off",
+    "voice.speakInstead": "Speak instead of typing",
+    "voice.speakIn": "Speak in {lang}",
+    "voice.unsupported": "Voice input needs Chrome, Edge or Safari. Type your message instead.",
+    "voice.blocked": "Microphone blocked. Allow it in your browser settings to dictate.",
+    "voice.nothingHeard": "We did not hear anything. Try again, or type it.",
+    "voice.lowConfidence": "⚠ Check this — we were not sure we heard it right.",
+    "faq.title": "Common issues — find your answer instantly",
+    "faq.sub": "Tap one to start a conversation about it straight away.",
+    "tickets.title": "Your tickets",
+    "tickets.tagline": "AI where it’s safe. Human where it matters.",  # noqa: RUF001
+    "tickets.welcome": "Welcome back, {name}",
+    "tickets.one": "1 ticket",
+    "tickets.many": "{n} tickets",
+    "tickets.new": "New support request",
+    "th.ticket": "Ticket",
+    "th.subject": "Subject",
+    "th.category": "Category",
+    "th.status": "Status",
+    "th.rating": "Rating",
+    "th.updated": "Last updated",
+    "action.open": "Open",
+    "action.rateThis": "Rate this",
+    "rating.youRated": "You rated this {n} of 5",
+    "empty.title": "No tickets yet",
+    "empty.body": "Raise your first one and we will pick it up straight away.",
+    "notice.notYours": "That ticket is not yours. Here are your own.",
+    "status.Handled by AI": "Handled by AI",
+    "status.A human agent is reviewing": "A human agent is reviewing",
+    "status.Resolved": "Resolved",
+    "cat.Recharge": "Recharge",
+    "cat.Refund": "Refund",
+    "cat.Order & Delivery": "Order & Delivery",
+    "cat.Network": "Network",
+    "cat.Account & Login": "Account & Login",
+    "cat.Other": "Other",
+    "time.justNow": "just now",
+    "time.minutes": "{n}m ago",
+    "time.hours": "{n}h ago",
+    "time.days": "{n}d ago",
+    "modal.title": "New support request",
+    "modal.sub": "Tell us what happened and we will look at it straight away.",
+    "modal.subject": "Subject",
+    "modal.subjectPlaceholder": "Recharge failed but money was deducted",
+    "modal.category": "Category",
+    "modal.what": "What happened",
+    "modal.whatPlaceholder": "Describe the problem in your own words.",
+    "modal.cancel": "Cancel",
+    "modal.submit": "Raise ticket",
+    "modal.raising": "Raising…",
+    "modal.created": "Ticket created",
+    "modal.lookingNow": "We’re looking at this now.",  # noqa: RUF001
+    "err.unreachable": "Could not reach the server.",
+    "err.couldNotRaise": "Could not raise that ticket.",
+    "chat.back": "← All tickets",
+    "chat.placeholder": "Type your message…",
+    "chat.send": "Send",
+    "chat.sending": "Sending",
+    "chat.thinking": "Looking at this…",
+    "chat.humanJoining": "A human agent is joining this conversation",
+    "chat.sentByVoice": "Sent by voice",
+    "play.play": "Play",
+    "play.stop": "Stop",
+    "player.playLatest": "Play latest reply",
+    "offer.question": "Show Setu in {lang}?",
+    "offer.yes": "Yes, switch",
+    "offer.no": "No, keep {lang}",
+    "rate.title": "Was your issue resolved?",
+    "rate.titleDone": "Thanks — you rated this",
+    "rate.sub": "Tell us how it went. One tap, and a line if you want to.",
+    "rate.subDone": "You can change this for 24 hours after rating.",
+    "rate.placeholder": "Anything you want to add? (optional)",
+    "rate.send": "Send rating",
+    "rate.update": "Update rating",
+    "rate.pickStar": "Pick a star first.",
+    "rate.sending": "Sending…",
+    "rate.couldNotSave": "Could not save that.",
+    "rate.thanks": "Thanks for rating this",
+    "rate.ariaStars": "Rate from 1 to 5",
+    "faq.opening": "Opening a ticket…",
+    "faq.showAll": "Show all {n}",
+    "faq.showFewer": "Show fewer",
+    "faq.couldNotOpen": "Could not open a ticket. Try again, or use New support request.",
+    "cat.Billing & Payments": "Billing & Payments",
+    "cat.App & Technical": "App & Technical",
+    "note.assistantBusy": "Thanks — we have your message. Our assistant is taking longer than usual, so a member of our team will reply here shortly.",
+    "chat.typing": "Setu is typing…",
+    "play.noVoice": "This device has no {lang} voice to read this aloud",
+    "profile.open": "Profile settings",
+    "profile.back": "← Your tickets",
+    "profile.title": "Profile settings",
+    "profile.sub": "Your account, as we have it. Changes are saved straight away.",
+    "profile.details": "Account details",
+    "profile.name": "Name",
+    "profile.email": "Email",
+    "profile.username": "Username",
+    "profile.phone": "Phone",
+    "profile.phonePlaceholder": "+91 98765 43210",
+    "profile.phoneHint": "Optional. So a person can call you back if you ask.",
+    "profile.language": "Language",
+    "profile.memberSince": "Member since",
+    "profile.lastSignIn": "Last signed in",
+    "profile.readOnly": "Your email and username can't be changed here — they are how you sign in and how your tickets are filed. Raise a ticket if one needs to change.",
+    "profile.save": "Save changes",
+    "profile.saving": "Saving…",
+    "profile.saved": "Saved.",
+    "profile.passwordTitle": "Change password",
+    "profile.currentPassword": "Current password",
+    "profile.newPassword": "New password",
+    "profile.confirmPassword": "Confirm new password",
+    "profile.passwordHint": "At least 8 characters.",
+    "profile.updatePassword": "Update password",
+    "profile.passwordChanged": "Password changed.",
+    "profile.signOutTitle": "Sign out",
+    "profile.signOutBody": "End your session on this device and return to the sign-in page.",
+    "profile.signOut": "Sign out",
+    "profile.err.name": "Your name must be between 1 and 60 characters.",
+    "profile.err.phone": "Enter a phone number of 10 to 15 digits, optionally starting with +.",
+    "profile.err.current": "Your current password is not right.",
+    "profile.err.same": "The new password is the same as the current one.",
+    "profile.err.short": "The new password must be at least 8 characters.",
+    "profile.err.mismatch": "The two new passwords do not match.",
+    "handoff.escalated": "I'm sorry this has been so difficult. I've asked a member of our support team to take over this conversation personally — they'll reply to you here shortly.",
+}
+
+# Hindi is written by hand in i18n.js so the author can proofread it, and the
+# page applies that seed without asking the server at all. Anything else is
+# bought once per language and kept for the life of the process.
+SEEDED_LANGUAGES = ("en", "hi")
+
+_UI_CACHE = {}
+
+# Small enough that one dropped line only costs its own batch. translate_lines
+# falls back to English on a count mismatch, so without batching a single bad
+# response would leave the whole page untranslated.
+UI_BATCH = 20
+
+
+def ui_strings(language):
+    """The catalogue in `language`, English for anything that fails.
+
+    Cached per language for the life of the process: the words do not change,
+    so a language is a fixed one-off cost however many customers sign in.
+    """
+    language = languages.normalise(language)
+    # Hindi is the hand-written seed from i18n.js, NOT English. Returning
+    # English here -- on the theory that the page had its own copy -- is
+    # exactly what used to happen, and the page applied its Hindi and then
+    # overwrote it with this English the moment the request came back.
+    if language == "hi":
+        return _seeded_hindi()
+    if language in SEEDED_LANGUAGES:
+        return dict(UI_STRINGS)
+    if language in _UI_CACHE:
+        return _UI_CACHE[language]
+
+    note = languages.reply_instruction(language)
+    if not note:
+        return dict(UI_STRINGS)
+
+    # The model is translating UI labels, not a reply, so it needs two rules
+    # the reply instruction does not carry.
+    note += ("\nThese are interface labels. Keep any {placeholder} in braces "
+             "EXACTLY as written, in the same place, untranslated.\n"
+             "Keep the words AI, Chrome, Edge and Safari as they are.")
+
+    keys = list(UI_STRINGS)
+    out = dict(UI_STRINGS)
+    for start in range(0, len(keys), UI_BATCH):
+        chunk = keys[start:start + UI_BATCH]
+        english = [UI_STRINGS[k] for k in chunk]
+        try:
+            done = session.coach.translate_lines(english, note)
+        except Exception:
+            continue                # that batch stays English; the rest still lands
+        if len(done) != len(chunk):
+            continue
+        for key, text in zip(chunk, done, strict=True):
+            # A translation that dropped a placeholder would render "{n}" or
+            # nothing at all, so the English is safer than a broken line.
+            if placeholders(UI_STRINGS[key]) == placeholders(text):
+                out[key] = text
+
+    _UI_CACHE[language] = out
+    return out
+
+
+def ui_strings_cached(language):
+    """The catalogue in `language` WITHOUT ever calling the model.
+
+    For the moments the model is the thing that failed: the hand-written
+    seed, or a translation already bought, or English. Never a fresh call.
+    """
+    language = languages.normalise(language)
+    if language in SEEDED_LANGUAGES:
+        return dict(UI_STRINGS) if language == "en" else _seeded_hindi()
+    return _UI_CACHE.get(language) or dict(UI_STRINGS)
+
+
+def _seeded_hindi():
+    """The Hindi the page itself ships with, read from i18n.js so there is
+    still exactly one copy of it."""
+    global _HINDI_SEED
+    if _HINDI_SEED is None:
+        _HINDI_SEED = dict(UI_STRINGS)
+        try:
+            with open(os.path.join(app.static_folder, "i18n.js"),
+                      encoding="utf-8") as handle:
+                source = handle.read()
+            block = source[source.index("var HI = {"):]
+            block = block[:block.index("\n  };")]
+            for key, text in re.findall(
+                    r'\n\s*"([^"]+)":\s*\n?\s*"((?:[^"\\]|\\.)*)"', block):
+                _HINDI_SEED[key] = json.loads(f'"{text}"')
+        except (OSError, ValueError):
+            pass                        # English is a safe answer
+    return _HINDI_SEED
+
+
+_HINDI_SEED = None
+
+
+def placeholders(text):
+    return sorted(re.findall(r"\{(\w+)\}", text))
+
+
+# Six data-driven labels per language, translated once and kept. The card's
+# own heading and subheading live in the catalogue above with the rest of the
+# chrome; only the issue labels, which come from FAQS, are bought here.
+_FAQ_LABELS = {}
+
+
+def faq_labels(language):
+    """The six FAQ labels in `language`, English if we cannot get them.
+
+    The card is decoration around a search: if the translation fails the
+    customer still sees six working buttons, in English, rather than an error.
+    """
+    english = [faq["label"] for faq in FAQS]
+    if language == DEFAULT_LANGUAGE:
+        return english
+    if language in _FAQ_LABELS:
+        return _FAQ_LABELS[language]
+
+    try:
+        translated = session.coach.translate_lines(
+            english, languages.reply_instruction(language))
+    except Exception:
+        return english                 # not worth failing the page over
+
+    _FAQ_LABELS[language] = translated
+    return translated
+
+
+# ---------------------------------------------------------------------------
+# The customer's profile
+# ---------------------------------------------------------------------------
+@app.get("/portal/profile")
+@require_exact("customer")
+def portal_profile_page():
+    return send_from_directory(app.static_folder, "profile.html")
+
+
+@app.get("/api/portal/profile")
+@require_exact("customer")
+def portal_profile():
+    """Read from the users table itself -- the same row sign-in checks."""
+    return jsonify({"ok": True, "profile": auth.profile_of(signed_in_username())})
+
+
+def profile_refusal(error):
+    return jsonify({"ok": False, "code": getattr(error, "code", "other"),
+                    "error": str(error)}), 400
+
+
+@app.post("/api/portal/profile")
+@require_exact("customer")
+def portal_update_profile():
+    """Change the editable fields. Email and username are not read at all,
+    whatever the request sends -- they are read-only by design."""
+    body = request.json or {}
+    try:
+        auth.update_profile(signed_in_username(),
+                            display_name=body.get("display_name"),
+                            phone=body.get("phone"))
+    except ValueError as error:
+        return profile_refusal(error)
+    return jsonify({"ok": True, "profile": auth.profile_of(signed_in_username())})
+
+
+@app.post("/api/portal/password")
+@require_exact("customer")
+def portal_change_password():
+    body = request.json or {}
+    if (body.get("new") or "") != (body.get("confirm") or ""):
+        return jsonify({"ok": False, "code": "mismatch",
+                        "error": "The two new passwords do not match."}), 400
+    try:
+        auth.change_password(signed_in_username(), body.get("current"),
+                             body.get("new"))
+    except ValueError as error:
+        return profile_refusal(error)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/portal/faqs")
+@require_exact("customer")
+def portal_faqs():
+    """The same six Knowledge groups the dashboard counts, with real counts."""
+    language = languages.normalise(
+        getattr(current_user, "preferred_language", DEFAULT_LANGUAGE))
+    labels = faq_labels(language)
+    cases = load_cases()
+    blobs = [" ".join([c.get("key_issue", "")]
+                      + [m.get("text", "") for m in c.get("messages", [])]).lower()
+             for c in cases]
+
+    rows = []
+    for faq, label in zip(FAQS, labels, strict=True):
+        rows.append({
+            "id": faq["id"], "icon": faq["icon"], "label": label,
+            "english": faq["label"],
+            "category": FAQ_CATEGORY.get(faq["id"], "Other"),
+            "count": sum(1 for b in blobs
+                         if any(w in b for w in faq["keywords"])),
+        })
+    rows.sort(key=lambda r: -r["count"])
+    return jsonify({"ok": True, "faqs": rows, "language": language})
+
+
+@app.post("/api/portal/faq/<faq_id>")
+@require_exact("customer")
+def portal_faq_answer(faq_id):
+    """Try to answer a common issue outright, in the customer's language.
+
+    A confident article means the customer may never need a ticket at all.
+    A miss is logged to the same signal that feeds "Questions we cannot
+    answer", because that is exactly what it is.
+    """
+    faq = next((f for f in FAQS if f["id"] == faq_id), None)
+    if faq is None:
+        return jsonify({"ok": False, "error": "Unknown issue."}), 404
+
+    language = getattr(current_user, "preferred_language", "en")
+    category = FAQ_CATEGORY.get(faq_id, "Other")
+
+    refused = over_budget()
+    if refused:
+        return refused
+
+    article = None
+    try:
+        article = coach_core.find_kb_article(faq["question"])
+    except Exception:
+        article = None            # a search failure is a miss, not a crash
+
+    confident = (article and article.get("how") == "semantic"
+                 and article.get("score", 0) >= pipeline.AUTO_RESOLVE_THRESHOLD)
+
+    if not confident:
+        # The same log the Knowledge section reads.
+        record_unanswered(faq["question"], who=signed_in_username())
+        return jsonify({"ok": True, "answered": False, "category": category})
+
+    try:
+        answer = session.coach.suggest_reply(
+            faq["question"], [], analysis={}, facts=[],
+            language_note=languages.reply_instruction(language))
+    except Exception as error:
+        return failure(error)
+
+    return jsonify({"ok": True, "answered": True, "category": category,
+                    "answer": answer, "topic": article.get("topic"),
+                    "language": language})
+
+
+@app.post("/api/portal/faq/<faq_id>/solved")
+@require_exact("customer")
+def portal_faq_solved(faq_id):
+    """The customer says the article answered it. No ticket is raised.
+
+    Recorded as a CLOSED case rather than a counter of its own, so it lands
+    in the deflection rate the dashboard already computes -- that rate is a
+    share of cases, and a deflection with no case cannot appear in it. The
+    case says plainly what it was: answered from the knowledge base, never
+    raised as a ticket.
+    """
+    faq = next((f for f in FAQS if f["id"] == faq_id), None)
+    if faq is None:
+        return jsonify({"ok": False, "error": "Unknown issue."}), 404
+
+    me = signed_in_username()
+    language = getattr(current_user, "preferred_language", "en")
+    answer = (request.json or {}).get("answer", "")
+
+    stamp = now_iso()
+    case = {
+        "id": next_case_id(load_cases()),
+        "customer": me, "owner": None,
+        "subject": faq["label"], "category": FAQ_CATEGORY.get(faq_id, "Other"),
+        # The subject stays English so the agent console and the Knowledge
+        # grouping keep reading one vocabulary; only the reply is translated.
+        "status": "auto_resolved", "resolution_mode": "ai_autonomous",
+        "opened_at": stamp, "closed_at": stamp, "first_response_at": stamp,
+        "language": language,
+        "escalation_risk": "low", "sentiment": "neutral", "urgency": "low",
+        "frustration": 10, "trend": "flat", "emotion": "Calm",
+        "intent": "Product question", "intent_confidence": None,
+        "key_issue": faq["label"],
+        "turns": 2, "calls": 1, "trajectory": [10],
+        "messages": [
+            {"speaker": "customer", "text": faq["question"], "source": "human",
+             "channel": "typed", "author": ""},
+            {"speaker": "agent", "text": answer, "source": "ai",
+             "channel": "typed", "author": ""},
+        ],
+        "deflected_from_faq": faq["id"],
+        "suggestion": answer, "auto_reply": {"reply": answer, "topic": faq["id"]},
+        "feedback": None, "facts": [], "ratings": [], "redactions": [],
+        "unanswered": [],
+    }
+    save_case(case)
+    return jsonify({"ok": True, "ticket": as_customer_case(case)})
+
+
+@app.post("/api/portal/cases/<case_id>/rating")
+@require_exact("customer")
+def portal_rate(case_id):
+    """The customer rates their own ticket.
+
+    The agent-side /api/cases/<id>/csat cannot serve this: it is guarded by
+    require_role("agent"), and a customer sits below that on purpose. Rather
+    than widen that guard, this route answers "is it yours" the way the rest
+    of the portal does -- and both call the SAME record_csat(), so the rules
+    about stars, comments and the 24-hour window have one implementation.
+    """
+    case = customer_case_or_none(case_id, signed_in_username())
+    if case is None:
+        return jsonify({"ok": False, "error": f"No ticket {case_id}."}), 404
+
+    body = request.json or {}
+    updated, why = record_csat(case, body.get("score"), body.get("comment", ""))
+    if updated is None:
+        return jsonify({"ok": False, "error": why}), 400
+
+    save_case(updated)
+    return jsonify({"ok": True,
+                    "ticket": as_customer_case(updated, with_messages=True)})
+
+
+@app.post("/api/portal/cases/<case_id>/message")
+@require_exact("customer")
+def portal_message(case_id):
+    """Carry on the conversation. Same pipeline, scoped session."""
+    text = ((request.json or {}).get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "Empty message."}), 400
+
+    case = customer_case_or_none(case_id, signed_in_username())
+    if case is None:
+        return jsonify({"ok": False, "error": f"No ticket {case_id}."}), 404
+
+    refused = over_budget()
+    if refused:
+        return refused
+
+    language = getattr(current_user, "preferred_language", None) or DEFAULT_LANGUAGE
+    me = signed_in_username()
+
+    # Record under the case's lock -- re-reading it first, so a reply the
+    # assistant wrote a moment ago is not overwritten -- and answer at once.
+    # If the assistant is already working on this case it will pick this
+    # message up itself; otherwise start it.
+    began = time.perf_counter()
+    with case_lock(case_id):
+        sess = scoped_session_for(find_case(case_id) or case)
+        pipeline.record_customer_message(
+            sess, text, channel=read_channel(request.json or {}))
+        start = case_id not in AI_BUSY
+        if start:
+            AI_BUSY.add(case_id)
+    if start:
+        start_assistant(case_id, me, language)
+    log.info("message on %s saved in %dms", case_id,
+             (time.perf_counter() - began) * 1000)
+
+    fresh = customer_case_or_none(case_id, me)
+    return jsonify({"ok": True,
+                    "ticket": as_customer_case(fresh or {}, with_messages=True)})
 
 
 # ==========================================================================
@@ -785,7 +2489,7 @@ def index():
 
 
 @app.get("/dashboard")
-@require_role("lead")
+@require_role("admin")
 def dashboard():
     return send_from_directory(app.static_folder, "dashboard.html")
 
@@ -810,14 +2514,20 @@ def health():
         "ok": True,
         "has_key": has_key,
         "key_file": key_file or None,
-        "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
     })
 
 
 @app.post("/api/customer")
 @require_role("agent")
 def customer_message():
-    text = (request.json or {}).get("text", "").strip()
+    """A customer message, from the agent console.
+
+    The turn itself lives in pipeline.run_customer_turn() so that the portal
+    runs exactly the same one. All this route does is HTTP.
+    """
+    body = request.json or {}
+    text = (body.get("text", "") or "").strip()
     if not text:
         return jsonify({"ok": False, "error": "Empty message."}), 400
 
@@ -825,113 +2535,21 @@ def customer_message():
     if refused:
         return refused
 
-    session.state.add_message("customer", text)
-    session.last_customer_message = text
-
-    # Log it before we call the model -- whether we can answer this has
-    # nothing to do with whether the analysis succeeds.
-    if is_knowledge_gap(text):
-        session.unanswered.append({"text": text, "at": now_iso()})
-
-    # Give the case its id BEFORE the first model call, so every token this
-    # turn spends has a case to be billed to. Without this the opening turn
-    # of every conversation would be recorded against no case at all.
-    if session.case_id is None:
-        session.persist()
-
-    started = time.perf_counter()
     try:
-        # Hand over the whole conversation so the model judges the trajectory,
-        # not one isolated sentence.
-        analysis = session.coach.analyze_customer_message(
-            text, session.state.history
-        )
+        turn = pipeline.run_customer_turn(
+            session, text, channel=read_channel(body))
     except Exception as error:
-        session.persist()            # keep the case even if the model failed
         return failure(error)
-    elapsed = int((time.perf_counter() - started) * 1000)
-    session.calls += 1
-
-    session.state.sentiment = analysis.get("sentiment", "unknown")
-    session.state.urgency = analysis.get("urgency", "unknown")
-    session.state.escalation_risk = analysis.get("escalation_risk", "unknown")
-    session.state.key_issue = analysis.get("key_issue", "")
-    session.state.frustration = analysis.get(
-        "frustration", FALLBACK_SCORE.get(session.state.escalation_risk, 35)
-    )
-    session.state.trend = analysis.get("trend", "flat")
-    note_redactions(session)
-    session.trajectory.append(session.state.frustration)
-
-    # Query the order system now rather than waiting for the agent to reply,
-    # so the facts are on screen while they are still typing.
-    try:
-        session.facts = session.coach.gather_facts(
-            text, session.state.history, allow_writes=session.allow_writes
-        )
-    except Exception:
-        session.facts = []          # a lookup failing must not lose the turn
-
-    # Can we just answer this, without an agent ever seeing it?
-    session.auto_reply = None
-    try:
-        auto = try_auto_resolve(text)
-    except Exception:
-        auto = None                 # never let this break an ordinary turn
-
-    if auto:
-        session.auto_reply = auto
-        session.calls += 1
-        # The automatic answer is a real reply, so it goes in the transcript
-        # and it stops the first-response clock. Deflection answers instantly,
-        # which is rather the point of it.
-        session.state.add_message("agent", auto["reply"])
-        # An automatic answer is only ever sent when an article matched.
-        open_rating_slot(session, True, auto.get("topic"))
-        session.last_suggestion = auto["reply"]
-        if session.first_response_at is None:
-            session.first_response_at = now_iso()
-        session.persist(status="auto_resolved", closed_at=now_iso())
-
-    else:
-        # Draft a reply NOW, on the customer's turn.
-        #
-        # This used to wait until the agent had already typed something, which
-        # is backwards: by then they have done the work the draft was meant to
-        # save. The agent should open the case and find a reply waiting, ready
-        # to send, edit, or ignore.
-        try:
-            session.last_suggestion = session.coach.suggest_reply(
-                text,
-                session.state.history,
-                analysis={
-                    "sentiment": session.state.sentiment,
-                    "urgency": session.state.urgency,
-                    "key_issue": session.state.key_issue,
-                },
-                facts=session.facts,
-            )
-            session.calls += 1
-            note_redactions(session)
-
-            article = getattr(session.coach, "last_article", None)
-            open_rating_slot(session, article is not None,
-                             article.get("topic") if article else None)
-        except Exception:
-            # A draft failing must not cost the agent the analysis, the
-            # lookups, or the turn itself.
-            session.last_suggestion = ""
-
-        session.persist(reopen=True)
 
     return jsonify({
         "ok": True,
-        "analysis": analysis,
-        "latency_ms": elapsed,
-        "model_used": getattr(session.coach, "last_model_used", session.coach.model),
-        "facts": session.facts,
-        "auto_reply": session.auto_reply,
-        "suggestion": session.last_suggestion,
+        "analysis": turn.analysis,
+        "latency_ms": turn.latency_ms,
+        "model_used": getattr(session.coach, "last_model_used",
+                              session.coach.model),
+        "facts": turn.facts,
+        "auto_reply": turn.auto_reply,
+        "suggestion": turn.suggestion,
         "state": session.as_dict(),
     })
 
@@ -939,7 +2557,8 @@ def customer_message():
 @app.post("/api/agent")
 @require_role("agent")
 def agent_message():
-    text = (request.json or {}).get("text", "").strip()
+    body = request.json or {}
+    text = (body.get("text", "") or "").strip()
     if not text:
         return jsonify({"ok": False, "error": "Empty message."}), 400
 
@@ -953,7 +2572,18 @@ def agent_message():
     if refused:
         return refused
 
-    session.state.add_message("agent", text)
+    # Two ways to land on hybrid. The console says so outright when the agent
+    # pressed "Use this reply"; the similarity check catches the agent who
+    # copied the draft by hand, or pressed the button, edited a line and sent
+    # it. Either is a draft that did work, which is what hybrid means.
+    clicked = bool(body.get("used_suggestion"))
+    close = similarity(text, session.last_suggestion) > HYBRID_SIMILARITY
+    # The agent's name travels with the message: the customer's chat shows
+    # it, so a person taking over from the AI is visible to them.
+    who = getattr(current_user, "display_name", None) or signed_in_username()
+    session.state.add_message(
+        "agent", text, source="hybrid" if (clicked or close) else "human",
+        channel=read_channel(body), author=who or "")
 
     # The moment the customer first hears back stops the SLA clock.
     if session.first_response_at is None:
@@ -982,7 +2612,6 @@ def agent_message():
         return failure(error)
     note_redactions(session)
     elapsed = int((time.perf_counter() - started) * 1000)
-    session.calls += 2
 
     session.last_feedback = {
         "tone_score": feedback.tone_score,
@@ -1009,15 +2638,137 @@ def agent_message():
 
 
 @app.post("/api/allow-writes")
-@require_role("lead")
+@require_role("admin")
 def set_allow_writes():
-    """Turn human approval for data-changing actions on or off.
+    """Decide whether the model may ASK for a data-changing action.
 
-    Off by default. With it off, the model may still ASK for a refund -- the
-    request is recorded and left uncarried out.
+    This is the only thing the checkbox controls. With it on, the write
+    declarations are sent to the API and the model can propose one; with it
+    off they are not sent at all, so there is nothing for it to propose.
+
+    Neither setting lets anything run. A proposal becomes a change when a
+    person clicks Approve, and nowhere else.
     """
+    if not may_use_write_actions():
+        return jsonify({"ok": False,
+                        "error": "Your role cannot arm write actions."}), 403
+
     session.allow_writes = bool((request.json or {}).get("allow", False))
-    return jsonify({"ok": True, "allow_writes": session.allow_writes})
+    return jsonify({"ok": True, "allow_writes": session.allow_writes,
+                    "offered": sorted(coach_core.WRITE_TOOLS)
+                    if session.allow_writes else []})
+
+
+@app.post("/api/actions/<int:action_id>/decide")
+@require_role("admin")
+def decide_action(action_id):
+    """Approve or reject one proposed write. THE approval point.
+
+    This is the only place in the application that calls a write tool, and it
+    is reachable only by an authenticated person POSTing a decision. The model
+    cannot reach it: it has no HTTP client, and the function-calling loop
+    never runs a tool marked `writes`.
+    """
+    if not may_use_write_actions():
+        return jsonify({"ok": False,
+                        "error": "Your role cannot approve actions."}), 403
+
+    wanted = (request.json or {}).get("decision", "")
+    if wanted not in (actions.APPROVED, actions.REJECTED):
+        return jsonify({"ok": False,
+                        "error": "Decision must be approved or rejected."}), 400
+
+    proposal = actions.get(action_id)
+    if proposal is None:
+        return jsonify({"ok": False, "error": f"No action {action_id}."}), 404
+
+    # The proposal belongs to a case, and the case has its own visibility
+    # rules. Approving a refund on somebody else's case is not a thing.
+    if proposal["case_id"]:
+        case = next((c for c in load_cases()
+                     if c.get("id") == proposal["case_id"]), None)
+        if case is not None and not may_see_case(case):
+            return jsonify({"ok": False,
+                            "error": "That action is on another agent's case."}), 403
+
+    # Recorded BEFORE the tool runs. If the write then fails, the trail still
+    # shows that a person approved it, which is the fact being audited.
+    decided, why = actions.decide(action_id, wanted, signed_in_username())
+    if decided is None:
+        return jsonify({"ok": False, "error": why}), 409
+
+    if wanted == actions.REJECTED:
+        return jsonify({"ok": True, "action": decided,
+                        "state": session.as_dict()})
+
+    tool = coach_core.BACK_OFFICE.get(decided["action"])
+    if tool is None or not tool["writes"]:
+        return jsonify({"ok": False,
+                        "error": f"{decided['action']} is not a write tool."}), 400
+
+    try:
+        result = tool["run"](**(decided["args"] or {}))
+    except Exception as error:
+        result = {"error": f"{type(error).__name__}: {error}"}
+
+    decided = actions.record_result(action_id, result)
+
+    # The run is part of the case, so it survives a reload and a reopen.
+    session.persist()
+    return jsonify({"ok": True, "action": decided,
+                    "state": session.as_dict()})
+
+
+@app.get("/api/actions")
+@require_role("admin")
+def list_actions():
+    """The audit trail, filtered the way the Cases table filters."""
+    rows, matched = actions.listing(
+        query=(request.args.get("q") or "").strip(),
+        action=request.args.get("action", "all"),
+        decision=request.args.get("decision", "all"),
+        limit=int(request.args.get("limit", 200)),
+    )
+    return jsonify({"ok": True, "actions": rows, "shown": len(rows),
+                    "matched": matched, "totals": actions.totals(),
+                    "known": sorted(coach_core.WRITE_TOOLS)})
+
+
+@app.get("/api/actions.csv")
+@require_role("admin")
+def export_actions_csv():
+    """Download the audit trail, honouring whatever filters are active."""
+    rows, _ = actions.listing(
+        query=(request.args.get("q") or "").strip(),
+        action=request.args.get("action", "all"),
+        decision=request.args.get("decision", "all"),
+        limit=100000,
+    )
+
+    columns = ["id", "at", "case_id", "username", "action", "description",
+               "arguments", "reason", "decision", "decided_at", "decided_by",
+               "reference", "outcome"]
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        result = row.get("result") or {}
+        writer.writerow({
+            **{k: row.get(k, "") or "" for k in columns},
+            "arguments": json.dumps(row.get("args") or {}),
+            "outcome": result.get("error") or result.get("summary", ""),
+        })
+
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="setu-actions-{stamp}.csv"'
+        },
+    )
 
 
 @app.post("/api/rate")
@@ -1057,6 +2808,102 @@ def reset():
     return jsonify({"ok": True, "state": session.as_dict()})
 
 
+def prepare_reopened_case(session):
+    """Draft a reply, and score it, for a case that was saved without one.
+
+    Cases whose draft failed at the time were saved with suggestion = "" --
+    the empty string at the end of the draft's except branch -- and opening a
+    case only ever replayed stored state. So those cases showed "No
+    suggestion yet" for ever, however many times you opened them.
+
+    This fills the gap once, on open, and persists the result, so opening the
+    same case again costs nothing.
+
+    Returns a dict describing what it produced, or None when there was
+    nothing to do.
+    """
+    if not session.last_customer_message:
+        return None
+
+    allowed, _why = metering.check_limits(signed_in_username())
+    if not allowed:
+        return None          # over budget: leave the panel honestly empty
+
+    # A case whose analysis never ran -- the model was down when the message
+    # arrived -- opened to "No signal" and "Nothing detected yet" for ever.
+    # Read it now, once, and it is on the case from then on.
+    analysed = False
+    if session.state.escalation_risk in (None, "", "unknown"):
+        try:
+            reading = session.coach.analyze_customer_message(
+                session.last_customer_message, session.state.history)
+            pipeline.apply_analysis(session, reading,
+                                    session.last_customer_message)
+            analysed = True
+        except Exception as error:
+            log.warning("analysis on open failed for %s: %s",
+                        session.case_id, error)
+
+    # The suggestion is usually there already -- the background assistant
+    # drafts one on every customer turn. It used to return here, which meant
+    # the draft was never SCORED and the scorecard stayed empty until the
+    # agent had written something. Only the drafting is skipped now.
+    drafted = False
+    if not session.last_suggestion:
+        drafted = draft_on_open(session)
+        if not drafted:
+            return {"analysed": True} if analysed else None
+
+    # Score the draft so the scorecard has something to show before the agent
+    # has written anything. Marked scored="draft" so nothing downstream
+    # mistakes it for a human's reply -- see performance().
+    scored_draft = False
+    if not session.last_feedback:
+        try:
+            verdict = session.coach.evaluate_agent_response(
+                session.last_customer_message, session.last_suggestion)
+            session.last_feedback = {
+                "tone_score": verdict.tone_score,
+                "empathy_score": verdict.empathy_score,
+                "clarity_score": verdict.clarity_score,
+                "coaching_tip": verdict.coaching_tip,
+                "scored": "draft",
+            }
+            scored_draft = True
+        except Exception as error:
+            print(f"  SCORING the draft failed for {session.case_id}: {error}")
+
+    if not (analysed or drafted or scored_draft):
+        return None
+    return {"analysed": analysed, "drafted": drafted, "scored_draft": scored_draft}
+
+
+def draft_on_open(session):
+    """Draft a reply for a case saved without one. True if it worked."""
+    try:
+        session.last_suggestion = session.coach.suggest_reply(
+            session.last_customer_message,
+            session.state.history,
+            analysis={
+                "sentiment": session.state.sentiment,
+                "urgency": session.state.urgency,
+                "key_issue": session.state.key_issue,
+            },
+            facts=session.facts,
+        )
+        note_redactions(session)
+        article = getattr(session.coach, "last_article", None)
+        open_rating_slot(session, article is not None,
+                         article.get("topic") if article else None)
+    except Exception as error:
+        # Loud this time. A silently swallowed draft failure is exactly what
+        # left these cases blank in the first place.
+        print(f"  DRAFT on open failed for {session.case_id}: {error}")
+        session.last_suggestion = ""
+        return False
+    return True
+
+
 @app.post("/api/open-case")
 @require_role("agent")
 def open_case():
@@ -1073,8 +2920,10 @@ def open_case():
                 return jsonify({"ok": False,
                                 "error": "That case belongs to another agent."}), 403
             session.load(case)
-            session.persist()      # record the claim if it was unowned
-            return jsonify({"ok": True, "state": session.as_dict()})
+            prepared = prepare_reopened_case(session)
+            session.persist()      # record the claim, and keep the new draft
+            return jsonify({"ok": True, "state": session.as_dict(),
+                            "prepared": prepared})
 
     return jsonify({"ok": False, "error": f"No case {case_id}."}), 404
 
@@ -1094,49 +2943,113 @@ def resolve():
 # ==========================================================================
 # API -- the dashboard
 # ==========================================================================
-def daily_counts(cases, min_days=7, max_days=30):
-    """Cases opened per day, split by their status now.
+# The windows the Trends toggle offers. 24 hours buckets by HOUR: a day
+# split into days is one or two bars, which is not a chart.
+RANGES = {
+    "24h": {"bucket": "hour", "size": 24},
+    "7d":  {"bucket": "day",  "size": 7},
+    "14d": {"bucket": "day",  "size": 14},
+    "30d": {"bucket": "day",  "size": 30},
+}
+DEFAULT_RANGE = "7d"
 
-    Days with no cases are filled in with zeros -- a gap in the middle of a
-    bar chart is information, and leaving those days out would quietly
-    compress the time axis and make the volume look steadier than it was.
+
+def read_range(default=DEFAULT_RANGE):
+    wanted = request.args.get("range", default)
+    return wanted if wanted in RANGES else default
+
+
+def window_starts(range_key):
+    """Every bucket start in the window, oldest first, plus the step size.
+
+    Both charts bucket through here. Two implementations of "the last 7 days"
+    drift the moment one of them is edited, and the two charts sit one above
+    the other where a one-bucket disagreement is plainly visible.
     """
-    buckets = defaultdict(lambda: {"resolved": 0, "pending": 0})
+    spec = RANGES.get(range_key, RANGES[DEFAULT_RANGE])
+    hourly = spec["bucket"] == "hour"
+    now = datetime.now(UTC)
 
+    step = timedelta(hours=1) if hourly else timedelta(days=1)
+    latest = (now.replace(minute=0, second=0, microsecond=0) if hourly
+              else datetime.combine(now.date(), datetime.min.time())
+                           .replace(tzinfo=UTC))
+    return [latest - step * i for i in range(spec["size"] - 1, -1, -1)], step, hourly
+
+
+def bucket_start(when, hourly):
+    """The bucket a timestamp belongs in."""
+    return (when.replace(minute=0, second=0, microsecond=0) if hourly
+            else datetime.combine(when.date(), datetime.min.time())
+                         .replace(tzinfo=UTC))
+
+
+def read_when(case):
+    """A case's opened_at as an aware datetime, or None if unreadable."""
+    opened = case.get("opened_at")
+    if not opened:
+        return None
+    try:
+        return datetime.fromisoformat(opened).astimezone(UTC)
+    except ValueError:
+        return None       # a timestamp we cannot read is not worth a crash
+
+
+def timeline(cases, range_key=DEFAULT_RANGE):
+    """Cases per bucket across a fixed window, ending now.
+
+    Quiet buckets are filled with zeros rather than dropped -- a gap in the
+    middle of a chart is information, and leaving it out would quietly
+    compress the time axis and make volume look steadier than it was.
+
+    Returns [] only when NOTHING in the store has a readable date. A window
+    with no cases in it still returns its empty buckets, so a quiet 24 hours
+    draws an empty axis rather than claiming there are no cases at all.
+    """
+    starts, step, hourly = window_starts(range_key)
+    window_start, latest = starts[0], starts[-1]
+
+    blank = {"resolved": 0, "pending": 0,
+             "ai_autonomous": 0, "hybrid": 0, "human": 0}
+    buckets = {s: dict(blank) for s in starts}
+
+    usable = 0
     for case in cases:
-        opened = case.get("opened_at")
-        if not opened:
+        when = read_when(case)
+        if when is None:
             continue
-        try:
-            day = datetime.fromisoformat(opened).astimezone(UTC).date()
-        except ValueError:
-            continue          # a timestamp we cannot read is not worth a crash
 
-        side = "resolved" if case.get("status") == "resolved" else "pending"
-        buckets[day.isoformat()][side] += 1
+        usable += 1
+        if when < window_start or when > latest + step:
+            continue          # outside the window the viewer asked for
 
-    if not buckets:
+        counts = buckets.get(bucket_start(when, hourly))
+        if counts is None:
+            continue
+
+        counts["resolved" if case.get("status") == "resolved"
+               else "pending"] += 1
+
+        mode = case.get("resolution_mode") or resolution_mode_for(case)
+        if mode in counts:
+            counts[mode] += 1
+
+    if not usable:
         return []
 
-    today = datetime.now(UTC).date()
-    first = min(date.fromisoformat(k) for k in buckets)
-
-    # Show at least a week so the chart has shape, and never more than a
-    # month so the bars stay readable.
-    span = max(min_days, min((today - first).days + 1, max_days))
-    start = today - timedelta(days=span - 1)
-
-    out, cursor = [], start
-    while cursor <= today:
-        counts = buckets.get(cursor.isoformat(), {"resolved": 0, "pending": 0})
+    out = []
+    for start in starts:
+        counts = buckets[start]
         out.append({
-            "day": cursor.isoformat(),
+            "at": start.isoformat(),
+            "day": start.date().isoformat(),
             "resolved": counts["resolved"],
             "pending": counts["pending"],
             "total": counts["resolved"] + counts["pending"],
+            "ai_autonomous": counts["ai_autonomous"],
+            "hybrid": counts["hybrid"],
+            "human": counts["human"],
         })
-        cursor += timedelta(days=1)
-
     return out
 
 
@@ -1145,22 +3058,72 @@ def daily_counts(cases, min_days=7, max_days=30):
 RISK_ORDER = {"high": 3, "medium": 2, "low": 1}
 
 
-def work_queue(cases, limit=8):
-    """Open cases, ranked by what an agent should pick up next.
+SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
-    Sorted by escalation risk first, then by age -- so the oldest of the
-    riskiest conversations sits at the top.
+
+def severity_for(case):
+    """The case's severity -- stored on anything analysed since the scale
+    existed, and read off the older readings for everything before it.
+
+    Older cases have an escalation risk and a 0-100 frustration score but no
+    severity. The same thresholds pipeline.severity_of() uses are applied to
+    those, so an old case and a new one with the same readings rank the same.
+    """
+    if case.get("severity") in SEVERITY_RANK:
+        return (case["severity"], case.get("severity_score"),
+                case.get("severity_reasons") or [])
+    score = case.get("frustration")
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        score = None
+    risk = case.get("escalation_risk")
+    if score is not None and score >= pipeline.CRITICAL_FROM:
+        return "critical", score, [f"frustration {score}/100"]
+    if risk == "high" or (score is not None and score >= pipeline.HIGH_FROM):
+        return "high", score, ["high escalation risk" if risk == "high"
+                               else f"frustration {score}/100"]
+    if risk == "medium" or (score is not None and score >= 35):
+        return "medium", score, ["some escalation risk"]
+    return "low", score, ["calm; nothing urgent"]
+
+
+def waiting_on_a_person(case):
+    """Open, and a person -- not the assistant -- has to answer it next.
+
+    A case the assistant is handling is not in anybody's queue: it has not
+    been escalated. A case with no handler at all predates the assistant and
+    was always a person's, so it stays exactly where it was.
+    """
+    if case.get("status") in CLOSED:
+        return False
+    return case.get("handler") != "ai"
+
+
+def work_queue(cases, limit=8):
+    """The Escalated Queue: open cases a person must answer, most urgent first.
+
+    Ordered by SEVERITY, then by how long the customer has waited -- so every
+    critical case sits above every high one, and among equals the one waiting
+    longest is first. Deterministic: ties on both fall back to the case id.
     """
     now = datetime.now(UTC)
     waiting = []
 
     for case in cases:
-        if case.get("status") in ("resolved", "auto_resolved"):
+        if not waiting_on_a_person(case):
             continue
 
         opened = parse_time(case.get("opened_at"))
+        level, score, reasons = severity_for(case)
         waiting.append({
             "id": case.get("id"),
+            "severity": level,
+            "severity_score": score,
+            "severity_reasons": reasons,
+            "handover": case.get("handover"),
+            "category": case.get("category") or "",
+            "subject": case.get("subject") or "",
             "escalation_risk": case.get("escalation_risk"),
             "frustration": case.get("frustration", 0),
             "turns": case.get("turns", 0),
@@ -1175,8 +3138,9 @@ def work_queue(cases, limit=8):
         })
 
     waiting.sort(key=lambda row: (
-        -RISK_ORDER.get(row["escalation_risk"], 0),   # riskiest first
-        -row["age_seconds"],                          # then oldest first
+        -SEVERITY_RANK.get(row["severity"], 0),       # most severe first
+        -row["age_seconds"],                          # then longest waiting
+        row["id"] or "",                              # then stable
     ))
 
     return {"queue": waiting[:limit], "total": len(waiting)}
@@ -1280,7 +3244,7 @@ def suggestion_quality(cases):
     }
 
 
-def performance(cases):
+def performance(cases, range_key=None):
     """How the agent is doing, and which way it is going.
 
     Every case carries at most one scorecard, so a "point" here is one scored
@@ -1288,14 +3252,36 @@ def performance(cases):
     honest unit -- pretending to per-reply resolution would be inventing
     detail we do not have.
     """
-    scored = [c for c in cases if c.get("feedback")]
+    # A scorecard marked scored="draft" rates a reply the coach wrote and
+    # nobody sent. Counting it here would mix the model's writing into "how
+    # the agent is doing", which is the one thing this panel must not do.
+    scored = [c for c in cases
+              if c.get("feedback")
+              and (c["feedback"] or {}).get("scored") != "draft"]
     scored.sort(key=lambda c: c.get("opened_at") or "")
+
+    # The chart follows the range toggle; the trend and the themes below do
+    # not. "Improving" judged over whatever window happens to be selected
+    # would flip direction as you click between them, which is a worse
+    # number than no number.
+    def in_window(rows):
+        if not range_key:
+            return rows
+        starts, step, _ = window_starts(range_key)
+        first, last = starts[0], starts[-1] + step
+        return [c for c in rows
+                if (w := read_when(c)) is not None and first <= w <= last]
+
+    charted = in_window(scored)
+    # CSAT rides the same axis, but a rated case is not necessarily a scored
+    # one -- an auto-resolved case has a rating and no scorecard.
+    charted_csat = in_window(rated(cases))
 
     fields = ("tone_score", "empathy_score", "clarity_score")
     short = {"tone_score": "tone", "empathy_score": "empathy",
              "clarity_score": "clarity"}
 
-    if not scored:
+    if not scored and not charted_csat:
         return {"scored": 0, "averages": {}, "by_day": [],
                 "trend": {}, "themes": [], "enough_for_trend": False}
 
@@ -1304,18 +3290,43 @@ def performance(cases):
                   if isinstance(r["feedback"].get(field), (int, float))]
         return round(sum(values) / len(values), 2) if values else None
 
-    # ---- averaged per day, skipping days with no scores ----
-    buckets = {}
-    for case in scored:
-        day = (case.get("opened_at") or "")[:10]
-        buckets.setdefault(day, []).append(case)
+    # ---- averaged per bucket, skipping buckets with no scores ----
+    # An empty bucket is left out rather than plotted as a gap at zero: no
+    # conversation was scored, which is not the same as one scoring nothing.
+    hourly = bool(range_key) and RANGES.get(
+        range_key, RANGES[DEFAULT_RANGE])["bucket"] == "hour"
+
+    def bucket_key(case):
+        when = read_when(case)
+        if when is None:
+            return None
+        return (bucket_start(when, hourly).isoformat() if range_key
+                else (case.get("opened_at") or "")[:10])
+
+    buckets, csat_buckets = {}, {}
+    for case in charted:
+        key = bucket_key(case)
+        if key:
+            buckets.setdefault(key, []).append(case)
+    for case in charted_csat:
+        key = bucket_key(case)
+        if key:
+            csat_buckets.setdefault(key, []).append(case)
 
     by_day = []
-    for day in sorted(buckets):
-        rows = buckets[day]
+    for key in sorted(set(buckets) | set(csat_buckets)):
+        rows = buckets.get(key, [])
+        rated_rows = csat_buckets.get(key, [])
+        stars = [r["csat_score"] for r in rated_rows]
         by_day.append({
-            "day": day, "n": len(rows),
+            "at": key,
+            "day": key[:10],
+            "n": len(rows),
             **{short[f]: mean(rows, f) for f in fields},
+            # None rather than 0 for a bucket nobody rated -- no rating is
+            # not a rating of nothing, and the line should break, not dive.
+            "csat": round(sum(stars) / len(stars), 2) if stars else None,
+            "csat_n": len(stars),
         })
 
     # ---- which way is it going? ----
@@ -1363,19 +3374,137 @@ def performance(cases):
     }
 
 
+@app.post("/api/cases/<case_id>/csat")
+@require_role("agent")
+def rate_case(case_id):
+    """Record the customer's rating of one resolved case.
+
+    Guarded by case visibility rather than by a role of its own, so it starts
+    working for a customer the moment the customer role and the portal exist
+    -- may_see_case() is where "their own ticket" will be answered.
+    """
+    body = request.json or {}
+
+    for case in load_cases():
+        if case.get("id") != case_id:
+            continue
+        if not may_see_case(case):
+            return jsonify({"ok": False,
+                            "error": "That case belongs to someone else."}), 403
+
+        updated, why = record_csat(case, body.get("score"),
+                                   body.get("comment", ""))
+        if updated is None:
+            return jsonify({"ok": False, "error": why}), 400
+
+        save_case(updated)
+        return jsonify({"ok": True, "case_id": case_id,
+                        "csat_score": updated["csat_score"],
+                        "csat_comment": updated["csat_comment"],
+                        "csat_at": updated["csat_at"],
+                        "editable_for_hours": CSAT_EDIT_HOURS})
+
+    return jsonify({"ok": False, "error": f"No case {case_id}."}), 404
+
+
+@app.post("/api/cases/<case_id>/gloss")
+@require_role("agent")
+def case_gloss(case_id):
+    """Plain English for a customer message written in another script.
+
+    The ONLY multilingual thing on the agent side. Shown UNDER the original,
+    never instead of it -- the agent should see what the customer actually
+    wrote. Cached on the message, so a case costs one call however many times
+    it is opened, and metered as its own "translate" step because it is a
+    real extra call the Cost page should not hide inside the draft.
+    """
+    for case in load_cases():
+        if case.get("id") != case_id:
+            continue
+        if not may_see_case(case):
+            return jsonify({"ok": False,
+                            "error": "That case belongs to another agent."}), 403
+
+        glosses, changed = {}, False
+        for index, message in enumerate(case.get("messages", [])):
+            if message.get("speaker") != "customer":
+                continue
+            text = message.get("text", "")
+            if languages.detect_language(text) in (None, "en"):
+                continue        # already readable
+
+            if message.get("gloss_en"):
+                glosses[index] = message["gloss_en"]
+                continue
+
+            try:
+                english = session.coach.translate_for_agent(text)
+            except Exception:
+                continue        # a failed gloss must not break the case view
+            message["gloss_en"] = english
+            glosses[index] = english
+            changed = True
+
+        if changed:
+            save_case(case)
+            # If this is the case the console has open, the live session holds
+            # its own copy of the transcript and will write it back on the next
+            # persist(). Put the gloss there too, or the save we just made is
+            # undone by the agent's very next message.
+            if session.case_id == case_id:
+                for index, english in glosses.items():
+                    if index < len(session.state.history):
+                        session.state.history[index].gloss_en = english
+        return jsonify({"ok": True, "glosses": glosses})
+
+    return jsonify({"ok": False, "error": f"No case {case_id}."}), 404
+
+
+@app.get("/api/queue")
+@require_role("agent")
+def queue_view():
+    """The work queue, for the console's third column.
+
+    /api/stats already carries a queue, but it is lead-only and the console
+    is an agent's page -- so this exists to widen the audience, NOT to rank
+    anything. The ordering is work_queue()'s, unchanged: one ranking, two
+    callers. A second sort written here would drift from the dashboard's and
+    the two views would disagree about what to pick up next.
+
+    Cases are filtered BEFORE ranking, so an agent's queue holds only what
+    they can actually open. Ranking first and hiding afterwards would leave
+    gaps in the list and a count that disagreed with it.
+    """
+    limit = max(1, min(int(request.args.get("limit", 50)), 200))
+    visible = [case for case in load_cases() if may_see_case(case)]
+
+    result = work_queue(visible, limit=limit)
+    result["ok"] = True
+    result["open_case"] = session.case_id
+    return jsonify(result)
+
+
 @app.get("/api/performance")
-@require_role("lead")
+@require_role("admin")
 def performance_view():
     cases = load_cases()
-    return jsonify({"ok": True, **performance(cases),
+    chosen_range = read_range()
+    return jsonify({"ok": True,
+                    "range": chosen_range,
+                    "bucket": RANGES[chosen_range]["bucket"],
+                    **performance(cases, chosen_range),
                     "suggestions": suggestion_quality(cases)})
 
 
 @app.get("/api/stats")
-@require_role("lead")
+@require_role("admin")
 def stats():
     """Everything the dashboard needs, counted server-side."""
     cases = load_cases()
+    # Only the timeline honours the range. The headline counts stay all-time:
+    # "43 resolved" quietly meaning "43 this week" would be a different number
+    # wearing the same label.
+    chosen_range = read_range()
 
     resolved = [c for c in cases if c.get("status") == "resolved"]
     deflected = [c for c in cases if c.get("status") == "auto_resolved"]
@@ -1384,6 +3513,23 @@ def stats():
 
     def count_by(field, values, source):
         return {v: sum(1 for c in source if c.get(field) == v) for v in values}
+
+    # Who closed what. Only cases that are actually closed have a resolver,
+    # so an open case waiting on a reply cannot quietly count as "AI handled".
+    closed = resolved + deflected
+    by_mode = {m: 0 for m in RESOLUTION_MODES}
+    for case in closed:
+        mode = case.get("resolution_mode") or resolution_mode_for(case)
+        if mode in by_mode:
+            by_mode[mode] += 1
+
+    decided = sum(by_mode.values())
+    # How much of the closed work the split actually describes. A case closed
+    # without an outgoing reply has no resolver, so the three modes cover
+    # fewer cases than "resolved + deflected" -- and presenting the split
+    # without saying so reads as though it covered all of them.
+    eligible_for_mode = len(closed)
+    ai_end_to_end = round(100 * by_mode["ai_autonomous"] / decided) if decided else 0
 
     total_turns = sum(c.get("turns", 0) for c in cases)
     total_calls = sum(c.get("calls", 0) for c in cases)
@@ -1407,16 +3553,31 @@ def stats():
         "pending_by_risk": count_by(
             "escalation_risk", ["low", "medium", "high"], pending
         ),
+        "csat": csat_summary(cases),
+        "csat_by_mode": csat_by_mode(cases),
+        "first_reply": median_first_reply(cases),
+        "categories": category_volume(cases),
+        "by_mode": by_mode,
+        "modes_counted": decided,
+        "modes_eligible": eligible_for_mode,
+        # The headline pair. Human touch rate is the exact inverse, computed
+        # from the same denominator so the two always sum to 100 -- two
+        # independent roundings would sometimes show 61% and 40%.
+        "ai_end_to_end": ai_end_to_end,
+        "human_touch_rate": 100 - ai_end_to_end if decided else 0,
         "sla": sla_summary(cases),
         "work_queue": work_queue(cases),
-        "by_day": daily_counts(cases),
+        "range": chosen_range,
+        "bucket": RANGES[chosen_range]["bucket"],
+        "by_day": timeline(cases, chosen_range),
         "avg_turns": round(total_turns / len(cases), 1) if cases else 0,
         "total_calls": total_calls,
         "open_case": session.case_id,
     })
 
 
-def filter_cases(cases, query="", status="all", risk="all", sentiment="all"):
+def filter_cases(cases, query="", status="all", risk="all", sentiment="all",
+                 mode="all"):
     """Narrow the case list. Every filter defaults to "all" = no filtering.
 
     The search runs over the case id, the key issue AND every message, which
@@ -1433,6 +3594,9 @@ def filter_cases(cases, query="", status="all", risk="all", sentiment="all"):
         if risk != "all" and case.get("escalation_risk") != risk:
             continue
         if sentiment != "all" and case.get("sentiment") != sentiment:
+            continue
+        if mode != "all" and (case.get("resolution_mode")
+                              or resolution_mode_for(case)) != mode:
             continue
 
         if query:
@@ -1456,6 +3620,7 @@ def read_filters():
         "status": request.args.get("status", "all"),
         "risk": request.args.get("risk", "all"),
         "sentiment": request.args.get("sentiment", "all"),
+        "mode": request.args.get("mode", "all"),
     }
 
 
@@ -1477,7 +3642,7 @@ def faqs():
     blobs = [haystack(c) for c in cases]
 
     rows = []
-    for faq in FAQS:
+    for faq in CONSOLE_FAQS:
         count = sum(
             1 for blob in blobs
             if any(word in blob for word in faq["keywords"])
@@ -1493,13 +3658,13 @@ def faqs():
         "faqs": rows,
         "ranked": sorted(rows, key=lambda r: -r["count"]),
         "matched": sum(1 for b in blobs if any(
-            w in b for f in FAQS for w in f["keywords"])),
+            w in b for f in CONSOLE_FAQS for w in f["keywords"])),
         "total_cases": len(cases),
     })
 
 
 @app.get("/api/cases")
-@require_role("lead")
+@require_role("admin")
 def list_cases():
     """Recent cases, newest first, without the full message transcript."""
     limit = int(request.args.get("limit", 25))
@@ -1536,7 +3701,7 @@ def list_cases():
 
 
 @app.get("/api/usage")
-@require_role("lead")
+@require_role("admin")
 def usage():
     """What the model is costing: today against the cap, by day, by step,
     and the conversations that spent the most."""
@@ -1544,29 +3709,36 @@ def usage():
 
 
 @app.get("/api/gaps")
-@require_role("lead")
+@require_role("admin")
 def knowledge_gaps():
     """Every question our documentation could not answer, most asked first."""
     grouped = {}
 
-    for case in load_cases():
-        for entry in case.get("unanswered", []):
-            text = (entry.get("text") or "").strip()
-            if not text:
-                continue
+    # Two sources, one meaning: a question nothing we have could answer.
+    # Cases carry theirs inline; a FAQ click that missed raised no ticket, so
+    # it lives in faq_misses -- see record_unanswered().
+    logged = [(case, entry) for case in load_cases()
+              for entry in case.get("unanswered", [])]
+    logged += [(None, miss) for miss in faq_misses()]
 
-            # Group on a squashed version so the same question asked twice
-            # counts twice, but we still display it as it was actually typed.
-            key = " ".join(text.lower().split())
-            row = grouped.setdefault(key, {
-                "text": text, "count": 0, "cases": [], "last_seen": None,
-            })
-            row["count"] += 1
-            if case.get("id") not in row["cases"]:
-                row["cases"].append(case.get("id"))
-            seen = entry.get("at") or case.get("opened_at")
-            if seen and (row["last_seen"] is None or seen > row["last_seen"]):
-                row["last_seen"] = seen
+    for case, entry in logged:
+        text = (entry.get("text") or "").strip()
+        if not text:
+            continue
+
+        # Group on a squashed version so the same question asked twice
+        # counts twice, but we still display it as it was actually typed.
+        key = " ".join(text.lower().split())
+        row = grouped.setdefault(key, {
+            "text": text, "count": 0, "cases": [], "last_seen": None,
+        })
+        row["count"] += 1
+        case_id = case.get("id") if case else None
+        if case_id and case_id not in row["cases"]:
+            row["cases"].append(case_id)
+        seen = entry.get("at") or (case.get("opened_at") if case else None)
+        if seen and (row["last_seen"] is None or seen > row["last_seen"]):
+            row["last_seen"] = seen
 
     rows = sorted(
         grouped.values(),
@@ -1601,7 +3773,7 @@ def export_json():
         json.dumps({"cases": cases}, indent=1),
         mimetype="application/json",
         headers={"Content-Disposition":
-                 f'attachment; filename="support-coach-cases-{stamp}.json"'},
+                 f'attachment; filename="setu-cases-{stamp}.json"'},
     )
 
 
@@ -1651,7 +3823,7 @@ def export_csv():
         mimetype="text/csv",
         headers={
             "Content-Disposition":
-                f'attachment; filename="support-coach-cases-{stamp}.csv"'
+                f'attachment; filename="setu-cases-{stamp}.csv"'
         },
     )
 
@@ -1776,7 +3948,7 @@ def run_cli(argv):
     print("""
   Account commands:
       --list-users
-      --add-user [username] [agent|lead|admin]
+      --add-user [username] [customer|agent|admin]
       --passwd [username]
       --disable-user [username]
       --enable-user [username]
@@ -1802,23 +3974,39 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
     imported = migrate_from_json()
+    backfilled = backfill_resolution_modes()
 
     # Cookie settings and the signing key, then the first admin if the user
     # table is empty. Both need the database, so they come after the migrate.
     auth.harden(app, local_only=True)
     seeded = auth.ensure_seed_admin()
+    moved = migrate_retired_roles()
+    # One documented password for the demo accounts, so the login page's
+    # one-click buttons can fill it. A convenience for presenting, not a
+    # security design -- change it with --passwd, or set DEMO_PASSWORD.
+    demo_password = os.getenv("DEMO_PASSWORD", "support-coach-demo")
+    demo_made = auth.ensure_demo_users(demo_password)
+    # Anything the assistant was answering when the server last stopped.
+    resume_waiting_assistants()
 
     key_file = coach_core.find_key_file()
     saved = load_cases()
 
     print()
-    print("  AI Support Coach")
+    print("  " + brand_line())
     print("  " + "-" * 46)
     print(f"  key file : {key_file or 'NOT FOUND - see gemini_api_key.txt'}")
-    print(f"  model    : {os.getenv('GEMINI_MODEL', 'gemini-3.5-flash')}")
+    print(f"  model    : {os.getenv('GEMINI_MODEL', 'gemini-3.5-flash-lite')}")
     print(f"  store    : sqlite  {os.path.basename(CASES_DB)}")
     if imported:
         print(f"  migrated : {imported} case(s) imported from cases.json")
+    if backfilled:
+        print(f"  backfill : resolution mode set on {backfilled} older case(s)")
+    for username, was, now in moved:
+        print(f"  role     : {username} moved from {was} to {now}")
+    if demo_made:
+        print(f"  seeded   : {', '.join(demo_made)} "
+              f"(password: {demo_password})")
     print(f"  cases    : {len(saved)} saved "
           f"({sum(1 for c in saved if c.get('status') == 'resolved')} resolved)")
 
@@ -1849,7 +4037,7 @@ if __name__ == "__main__":
         print()
         print("  Then add the people who will actually use this:")
         print("      python3 app/server.py --add-user priya agent")
-        print("      python3 app/server.py --add-user ravi lead")
+        print("      python3 app/server.py --add-user ravi agent")
         print("  " + "=" * 58)
 
     print()

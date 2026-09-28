@@ -4,10 +4,16 @@ import os
 
 import pytest
 
-needs_key = pytest.mark.skipif(
-    not os.getenv("GEMINI_API_KEY"),
-    reason="semantic search calls the embeddings API; keyword path is covered below",
-)
+
+def needs_key(test):
+    """Opt in to the real embeddings API. Everything else in the suite is
+    blocked from the network by conftest.no_network; these two are the only
+    tests that mean to reach it, and only with GEMINI_API_KEY set."""
+    test = pytest.mark.live_api(test)
+    return pytest.mark.skipif(
+        not os.getenv("GEMINI_API_KEY"),
+        reason="semantic search calls the embeddings API; keyword path is covered below",
+    )(test)
 
 
 @pytest.mark.parametrize("message,topic", [
@@ -40,8 +46,9 @@ def test_knowledge_gap_is_flagged(core):
 
 def test_gap_needs_both_matchers_to_miss(srv):
     """A gap means the knowledge base AND the FAQ list both had nothing."""
-    assert srv.is_knowledge_gap("mera recharge nahi hua") is False
-    assert srv.is_knowledge_gap("Can I get a GST invoice?") is True
+    import pipeline  # the gap check lives here now
+    assert pipeline.is_knowledge_gap("mera recharge nahi hua") is False
+    assert pipeline.is_knowledge_gap("Can I get a GST invoice?") is True
 
 
 def test_cosine_is_sane(core):

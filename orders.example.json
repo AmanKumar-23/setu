@@ -1,6 +1,7 @@
 {
  "_comment": "Mock back-office data. Stands in for the order system a real support tool would query. issue_refund() writes to this file.",
  "account": {
+  "customer_id": "CU-1001",
   "name": "Aman Kumar",
   "email": "aman.kumar@example.com",
   "phone": "+91 98765 43210",

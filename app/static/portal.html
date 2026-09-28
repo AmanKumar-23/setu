@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Setu — AI customer support for India. AI where it's safe. Human where it matters.">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.png" sizes="32x32" type="image/png">
+<title>Your tickets · Setu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F5F4F1; --surface:#FFFFFF; --surface-2:#FAFAF8; --surface-3:#F2F1ED;
+  --ink:#16181C; --ink-2:#5A6069; --ink-3:#8B929B;
+  --line:#EAE8E3; --line-2:#E0DDD6;
+  --brand:#EF4E2B; --brand-600:#D8401F; --brand-bg:#FEF0EC;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  --sh-1:0 1px 2px rgba(16,24,40,.05);
+  --sh-2:0 1px 3px rgba(16,24,40,.06), 0 8px 24px -6px rgba(16,24,40,.10);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+  min-height:100vh;display:flex;flex-direction:column}
+
+.appbar{flex:0 0 auto;background:var(--surface);border-bottom:1px solid var(--line);
+  padding:11px 20px;display:flex;align-items:center;gap:14px;box-shadow:var(--sh-1)}
+.brand{display:flex;align-items:center;gap:11px}
+.logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  background:linear-gradient(140deg,#FF6B3D,var(--brand) 60%,#D8401F);
+  color:#fff;font-weight:800;font-size:21px;letter-spacing:-.02em}
+.bname{font-size:15px;font-weight:750;letter-spacing:-.02em;line-height:1.1}
+/* ---------- the brand mark ----------
+   "से" and "सेतु" are real text, never an image: they stay selectable,
+   scale with the page and never blur on a retina screen. Devanagari sits
+   high in its em box, so a geometrically centred glyph reads as lifted --
+   the nudge leaves the शिरोरेखा an even distance from the badge edge. The
+   weight is inherited so "सेतु" and "· Setu" sit at the same weight and
+   on the same baseline. */
+.dev{font-family:"Noto Sans Devanagari","Mukta","Nirmala UI","Mangal",sans-serif}
+.logo .dev{display:block;line-height:1;font-weight:700;
+  transform:translateY(3px)}
+.btag{font-size:10.5px;color:var(--ink-3);font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;margin-top:1px;white-space:nowrap}
+.grow{flex:1}
+.me{display:flex;align-items:center;gap:9px;padding:4px 5px 4px 4px;
+  border:1px solid var(--line);border-radius:999px;background:var(--surface-2)}
+.me .av{width:26px;height:26px;flex:0 0 26px;border-radius:50%;display:grid;
+  place-items:center;font-size:11px;font-weight:800;color:#fff;
+  background:linear-gradient(140deg,#FF6B3D,var(--brand) 60%,#D8401F)}
+.me .mn{font-size:12.5px;font-weight:650;line-height:1.2}
+.me .mr{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);margin-top:1px}
+.me .out{width:26px;height:26px;border:0;border-radius:50%;background:transparent;
+  color:var(--ink-3);cursor:pointer;font-size:13px;transition:.15s}
+.melink{display:flex;align-items:center;gap:9px;color:inherit;
+  text-decoration:none;border-radius:999px}
+.melink:hover .mn{color:var(--brand)}
+.me .out:hover{background:var(--surface-3);color:var(--brand)}
+
+main{flex:1;padding:34px 24px 60px;display:flex;justify-content:center}
+.wrap{width:100%;max-width:960px}
+
+.vhead{display:flex;align-items:flex-end;gap:16px;margin-bottom:22px;flex-wrap:wrap}
+.vtitle{font-size:24px;font-weight:800;letter-spacing:-.035em}
+.vsub{font-size:13px;color:var(--ink-3);margin-top:4px}
+.vtag{font-size:12.5px;color:var(--ink-3);margin-top:7px;font-weight:500}
+.grow{flex:1}
+.btn{height:40px;padding:0 18px;border-radius:11px;border:1px solid var(--line-2);
+  background:var(--surface);color:var(--ink-2);font-family:var(--sans);font-size:13px;
+  font-weight:650;cursor:pointer;transition:.15s;box-shadow:var(--sh-1)}
+.btn:hover{background:var(--surface-2);color:var(--ink)}
+.btn.brand{background:linear-gradient(140deg,#FF6B3D,var(--brand) 62%,#D8401F);
+  border-color:transparent;color:#fff;box-shadow:0 1px 2px rgba(216,64,31,.28),
+  0 8px 20px -8px rgba(216,64,31,.5)}
+.btn.brand:hover{filter:brightness(1.05);color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:18px;
+  box-shadow:var(--sh-2);overflow:hidden}
+table{width:100%;border-collapse:collapse}
+thead th{text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);padding:13px 16px;
+  border-bottom:1px solid var(--line);background:var(--surface-2)}
+tbody td{padding:14px 16px;border-bottom:1px solid var(--line);font-size:13.5px;
+  vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--surface-2)}
+.cid{font-family:var(--mono);font-size:12px;font-weight:700}
+.subj{font-weight:600;color:var(--ink)}
+.cat{font-size:12px;color:var(--ink-2)}
+.when{font-size:12px;color:var(--ink-3);font-family:var(--mono)}
+.stars{font-size:13px;letter-spacing:1px;color:#E8A317;white-space:nowrap}
+.rateme{font-size:11.5px;font-weight:700;color:var(--brand);white-space:nowrap}
+
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;
+  font-size:11.5px;font-weight:700;white-space:nowrap}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.pill.green{background:var(--green-bg,#E7F5EC);color:#0B8A4B}
+.pill.amber{background:#FDF2E0;color:#C97A00}
+.pill.grey{background:var(--surface-3);color:var(--ink-3)}
+
+.empty{padding:56px 30px;text-align:center}
+.empty .ico{width:60px;height:60px;border-radius:18px;margin:0 auto 18px;display:grid;
+  place-items:center;font-size:26px;background:var(--brand-bg)}
+.empty h2{font-size:18px;font-weight:750;letter-spacing:-.02em;margin-bottom:8px}
+.empty p{font-size:13.5px;color:var(--ink-2);line-height:1.65;margin-bottom:22px}
+
+/* ---------- header controls ---------- */
+.hctl{display:flex;align-items:center;gap:8px;margin-right:4px}
+.lang{height:34px;padding:0 30px 0 11px;border-radius:10px;border:1px solid var(--line-2);
+  background:var(--surface) url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238B929B' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color:var(--ink);font-family:var(--sans);font-size:13px;font-weight:600;
+  cursor:pointer;appearance:none;outline:none;transition:.15s}
+.lang:hover{border-color:var(--brand)}
+.lang:focus{border-color:#F0A88F;box-shadow:0 0 0 3px rgba(239,78,43,.11)}
+.vtoggle{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;
+  border-radius:10px;border:1px solid var(--line-2);background:var(--surface);
+  color:var(--ink-2);font-size:12px;font-weight:650;cursor:pointer;
+  font-family:var(--sans);transition:.15s;white-space:nowrap}
+.vtoggle:hover{border-color:var(--brand);color:var(--brand)}
+.vtoggle[aria-pressed="false"]{opacity:.6}
+.vdot{width:7px;height:7px;border-radius:50%;background:#0B8A4B;display:block}
+.vtoggle[aria-pressed="false"] .vdot{background:var(--ink-3)}
+
+/* ---------- common issues ---------- */
+.faqs{background:var(--surface);border:1px solid var(--line);border-radius:18px;
+  box-shadow:var(--sh-2);padding:18px 20px;margin-bottom:18px}
+.faqs h2{font-size:15px;font-weight:750;letter-spacing:-.015em;margin-bottom:3px}
+.faqs .sub{font-size:12.5px;color:var(--ink-3);margin-bottom:14px}
+.faqgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(224px,1fr));gap:9px}
+.faq{display:flex;align-items:center;gap:10px;padding:11px 13px;border-radius:12px;
+  border:1px solid var(--line-2);background:var(--surface-2);cursor:pointer;
+  text-align:left;font-family:var(--sans);transition:.14s}
+.faq:hover{border-color:var(--brand);background:var(--brand-bg);transform:translateY(-1px)}
+.faq .em{font-size:16px;line-height:1;flex:0 0 auto}
+.faq .lab{flex:1;min-width:0;font-size:12.5px;font-weight:650;color:var(--ink);
+  line-height:1.35}
+.faq .n{font-size:11px;font-family:var(--mono);color:var(--ink-3);flex:0 0 auto}
+.faq:disabled{cursor:default;opacity:.55;transform:none}
+.faq .spin.dark{border-color:rgba(239,78,43,.25);border-top-color:var(--brand);
+  margin:0;width:13px;height:13px}
+.faqmore{margin-top:10px;background:none;border:0;padding:4px 2px;cursor:pointer;
+  font-family:var(--sans);font-size:12.5px;font-weight:650;color:var(--brand)}
+.faqmore:hover{text-decoration:underline}
+.faqmore[hidden]{display:none}
+
+.answer{margin-top:14px;border:1px solid #BFE3CD;background:#F2FAF5;border-radius:14px;
+  padding:15px 16px}
+.answer .k{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:#0B8A4B;margin-bottom:8px}
+.answer .txt{font-size:13.5px;line-height:1.7;color:var(--ink);white-space:pre-wrap;
+  margin-bottom:14px}
+.answer .row{display:flex;gap:9px;flex-wrap:wrap}
+.thinking{margin-top:14px;font-size:12.5px;color:var(--ink-3)}
+
+.mic{width:38px;height:38px;flex:0 0 38px;border-radius:11px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);
+  font-size:15px;cursor:pointer;display:grid;place-items:center;transition:.15s}
+.mic:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-bg)}
+.mic[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#fff;
+  animation:micpulse 1.4s ease-out infinite}
+@keyframes micpulse{70%{box-shadow:0 0 0 11px rgba(239,78,43,0)}
+  100%{box-shadow:0 0 0 0 rgba(239,78,43,0)}}
+.mic:disabled{opacity:.4;cursor:not-allowed}
+.microw{display:flex;gap:9px;align-items:flex-start}
+.microw textarea{flex:1}
+.ghost{margin-top:6px;font-size:13px;color:var(--ink-3);font-style:italic;
+  line-height:1.5}
+.lowconf{margin-top:7px;font-size:11.5px;font-weight:600;color:#C97A00;
+  background:#FDF2E0;border-radius:9px;padding:6px 10px;display:inline-block}
+
+.scrim{position:fixed;inset:0;background:rgba(22,24,28,.36);z-index:40;
+  display:grid;place-items:center;padding:20px;animation:fade .16s ease-out}
+/* display:grid above beats the UA's [hidden]{display:none} -- same
+   specificity, declared later -- so the closed modal stayed on top of the
+   page as an invisible sheet and swallowed every click on the table. */
+.scrim[hidden]{display:none}
+/* Same trap, same fix, for the controls added for voice and the FAQ card. */
+.faqs[hidden],.microw[hidden],.ghost[hidden],.lowconf[hidden],
+.hctl[hidden]{display:none}
+@keyframes fade{from{opacity:0}}
+.modal{width:100%;max-width:520px;background:var(--surface);border-radius:20px;
+  box-shadow:0 24px 60px -12px rgba(16,24,40,.3);overflow:hidden;
+  animation:rise .2s cubic-bezier(.2,.9,.3,1)}
+@keyframes rise{from{transform:translateY(10px);opacity:.6}}
+.mhead{padding:20px 22px 0}
+.mhead h2{font-size:18px;font-weight:800;letter-spacing:-.025em}
+.mhead p{font-size:12.5px;color:var(--ink-3);margin-top:5px}
+.mbody{padding:18px 22px 4px}
+.field{margin-bottom:15px}
+.field label{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:7px}
+.field input,.field select,.field textarea{width:100%;padding:11px 13px;border-radius:11px;
+  border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink);
+  font-family:var(--sans);font-size:13.5px;outline:none;transition:.15s}
+.field textarea{min-height:104px;resize:vertical;line-height:1.6}
+.field input:focus,.field select:focus,.field textarea:focus{
+  border-color:#F0A88F;background:var(--surface);box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
+.mfoot{padding:14px 22px 20px;display:flex;gap:9px;justify-content:flex-end;
+  border-top:1px solid var(--line);margin-top:14px}
+.err{background:#FCEDEB;color:#D6382F;border-radius:11px;padding:10px 13px;
+  font-size:12.5px;font-weight:600;margin-bottom:14px}
+
+.done{padding:40px 30px;text-align:center}
+.done .tick{width:56px;height:56px;border-radius:50%;margin:0 auto 18px;display:grid;
+  place-items:center;font-size:24px;background:#E7F5EC;color:#0B8A4B}
+.done h2{font-size:18px;font-weight:750;margin-bottom:7px}
+.done .cid{display:inline-block;margin:10px 0 6px;font-size:15px}
+.done p{font-size:13.5px;color:var(--ink-2)}
+.notice{background:#FDF2E0;color:#C97A00;border:1px solid #F3DDB4;border-radius:12px;
+  padding:11px 14px;font-size:12.5px;font-weight:600;margin-bottom:18px}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.4);
+  border-top-color:#fff;display:inline-block;animation:sp .7s linear infinite;
+  vertical-align:-2px;margin-right:7px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* Same app bar, same fix as the conversation page: it wraps rather than
+   pushing the user chip off the side and scrolling the whole page with it.
+   The ticket table keeps its columns and scrolls inside its own panel. */
+@media (max-width:640px){
+  .appbar{flex-wrap:wrap;row-gap:9px;padding:10px 16px;gap:10px}
+  .appbar .grow{flex:1 1 100%;height:0}
+  .brand{flex:0 1 auto;min-width:0}
+  .me{margin-left:auto}
+  .me .mr{display:none}
+  main{padding:22px 16px 40px}
+  .panel{overflow-x:auto}
+}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">
+    <div class="logo"><span class="dev">से</span></div>
+    <div>
+      <div class="bname"><span class="dev">सेतु</span> · Setu</div>
+      <div class="btag" data-i18n="header.subtitle">Customer portal</div>
+    </div>
+  </div>
+  <div class="grow"></div>
+  <div class="hctl">
+    <select class="lang" id="langPick" aria-label="Language"
+            data-i18n-aria="language"></select>
+    <button class="vtoggle" id="voiceToggle" aria-pressed="true"
+            data-i18n-title="voice.turnOff">
+      <span class="vdot"></span><span data-i18n="voice.button">Voice</span></button>
+  </div>
+  <div class="me" id="me" hidden>
+    <a class="melink" href="/portal/profile" data-i18n-title="profile.open">
+      <span class="av" id="meAv">?</span>
+      <span>
+        <span class="mn" id="meName" data-i18n-exempt>&mdash;</span>
+        <span class="mr" id="meRole" data-i18n-exempt>&mdash;</span>
+      </span>
+    </a>
+    <button class="out" id="signOut" data-i18n-title="signOut"
+            data-i18n-aria="signOut">&#9211;</button>
+  </div>
+</div>
+
+<main>
+  <div class="wrap">
+    <div class="notice" id="notice" hidden></div>
+
+    <div class="faqs" id="faqs" hidden>
+      <h2 id="faqTitle" data-i18n="faq.title">Common issues &mdash; find your answer instantly</h2>
+      <div class="sub" id="faqSub" data-i18n="faq.sub">Tap one and we will try to answer it straight away.</div>
+      <div class="faqgrid" id="faqGrid"></div>
+      <button class="faqmore" id="faqMore" type="button" hidden></button>
+      <div id="faqOut"></div>
+    </div>
+
+    <div class="vhead">
+      <div>
+        <div class="vtitle" data-i18n="tickets.title">Your tickets</div>
+        <div class="vsub" id="vsub">&nbsp;</div>
+        <div class="vtag" data-i18n="tickets.tagline">AI where it&rsquo;s safe. Human where it matters.</div>
+      </div>
+      <div class="grow"></div>
+      <button class="btn brand" id="newBtn" data-i18n="tickets.new">New support request</button>
+    </div>
+
+    <div id="listWrap"></div>
+  </div>
+</main>
+
+<div class="scrim" id="scrim" hidden>
+  <div class="modal" id="modal">
+    <div id="formView">
+      <div class="mhead">
+        <h2 data-i18n="modal.title">New support request</h2>
+        <p data-i18n="modal.sub">Tell us what happened and we will look at it straight away.</p>
+      </div>
+      <form id="form">
+        <div class="mbody">
+          <div class="err" id="err" hidden></div>
+          <div class="field">
+            <label for="subject" data-i18n="modal.subject">Subject</label>
+            <input id="subject" maxlength="120" data-i18n-ph="modal.subjectPlaceholder"
+                   placeholder="Recharge failed but money was deducted" required>
+          </div>
+          <div class="field">
+            <label for="category" data-i18n="modal.category">Category</label>
+            <select id="category"></select>
+          </div>
+          <div class="field">
+            <label for="description" data-i18n="modal.what">What happened</label>
+            <div class="microw">
+              <textarea id="description" data-i18n-ph="modal.whatPlaceholder"
+                        placeholder="Describe the problem in your own words." required></textarea>
+              <button type="button" class="mic" id="descMic" aria-pressed="false"
+                      data-voice data-i18n-title="voice.speakInstead">&#127908;</button>
+            </div>
+            <div class="ghost" id="descGhost" data-i18n-exempt hidden></div>
+            <div class="lowconf" id="descLow" hidden></div>
+          </div>
+        </div>
+        <div class="mfoot">
+          <button type="button" class="btn" id="cancelBtn" data-i18n="modal.cancel">Cancel</button>
+          <button type="submit" class="btn brand" id="submitBtn" data-i18n="modal.submit">Raise ticket</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="done" id="doneView" hidden>
+      <div class="tick">&#10003;</div>
+      <h2 data-i18n="modal.created">Ticket created</h2>
+      <div class="cid" id="doneId" data-i18n-exempt>&mdash;</div>
+      <p data-i18n="modal.lookingNow">We&rsquo;re looking at this now.</p>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js"></script>
+<script src="/static/voice.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let descSpoken = false;   // did the description arrive by voice?
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let CATEGORIES = [];
+let ME = "";
+
+const T = (key, vars) => SC.t(key, vars);
+
+/* Values the server sends in English -- the three customer states and the
+   category list -- are looked up by that English text, which is also the
+   value the server stores. An unknown one falls through unchanged rather
+   than vanishing. */
+const statusText = label => SC.strings["status." + label] || label;
+const catText    = name  => SC.strings["cat." + name] || name;
+
+/* The WORDS are translated; the NUMBER never is. A count in Devanagari
+   digits is harder to read at a glance, and it is the same figure the agent
+   console and the dashboard are quoting. */
+function when(iso){
+  if(!iso) return "—";
+  const then = new Date(iso), mins = Math.round((Date.now() - then) / 60000);
+  if(mins < 1)  return T("time.justNow");
+  if(mins < 60) return T("time.minutes", {n: mins});
+  const h = Math.floor(mins / 60);
+  if(h < 24) return T("time.hours", {n: h});
+  return T("time.days", {n: Math.floor(h / 24)});
+}
+
+/* The server decides the three states; this only paints them. Nothing about
+   risk, sentiment or scores ever reaches this page. */
+let TICKETS = [];
+let LOADED = false;      // has the list arrived yet?
+
+function render(tickets){
+  // Kept so a language change can repaint the same rows without refetching.
+  if(tickets){ TICKETS = tickets; LOADED = true; }
+  else if(!LOADED) return;      // nothing to repaint yet; do not flash "no tickets"
+  tickets = TICKETS;
+
+  $("vsub").textContent = tickets.length
+    ? (tickets.length === 1 ? T("tickets.one") : T("tickets.many", {n: tickets.length}))
+    : "\u00a0";
+
+  if(!tickets.length){
+    $("listWrap").innerHTML = `<div class="panel"><div class="empty">
+      <div class="ico">&#127915;</div>
+      <h2>${esc(T("empty.title"))}</h2>
+      <p>${esc(T("empty.body"))}</p>
+      <button class="btn brand" id="emptyNew">${esc(T("tickets.new"))}</button>
+    </div></div>`;
+    $("emptyNew").onclick = () => openModal();
+    return;
+  }
+
+  $("listWrap").innerHTML = `<div class="panel"><table>
+    <thead><tr>
+      <th>${esc(T("th.ticket"))}</th><th>${esc(T("th.subject"))}</th>
+      <th>${esc(T("th.category"))}</th><th>${esc(T("th.status"))}</th>
+      <th>${esc(T("th.rating"))}</th><th>${esc(T("th.updated"))}</th><th></th>
+    </tr></thead>
+    <tbody>${tickets.map((t,i) => `
+      <tr>
+        <td><span class="cid" data-i18n-exempt>${t.id}</span></td>
+        <td class="subj" data-s="${i}" data-i18n-exempt></td>
+        <td class="cat" data-c="${i}"></td>
+        <td><span class="pill ${t.status_tone}"><i></i><span data-l="${i}"></span></span></td>
+        <td>${t.rating
+              ? `<span class="stars" title="${esc(T("rating.youRated", {n: t.rating}))}">${
+                  "\u2605".repeat(t.rating)}${"\u2606".repeat(5 - t.rating)}</span>`
+              : t.can_rate
+                ? `<span class="rateme">${esc(T("action.rateThis"))}</span>`
+                : '<span class="when">\u2014</span>'}</td>
+        <td class="when">${when(t.updated_at)}</td>
+        <td style="text-align:right"><button class="btn" data-open="${t.id}">${
+          esc(T("action.open"))}</button></td>
+      </tr>`).join("")}</tbody></table></div>`;
+
+  // Text set separately: a subject is the customer's own words and is never
+  // translated in any language. The category and the state are ours, so they are.
+  tickets.forEach((t,i) => {
+    document.querySelector(`[data-s="${i}"]`).textContent = t.subject;
+    document.querySelector(`[data-c="${i}"]`).textContent = catText(t.category);
+    document.querySelector(`[data-l="${i}"]`).textContent = statusText(t.status_label);
+  });
+  document.querySelectorAll("[data-open]").forEach(b => {
+    b.onclick = () => { location.href = "/portal/chat/" + b.dataset.open; };
+  });
+}
+
+async function load(){
+  try{
+    const d = await (await fetch("/api/portal/tickets")).json();
+    if(!d.ok) return;
+    CATEGORIES = d.categories || [];
+    paintCategories();
+    render(d.tickets || []);
+  }catch(e){
+    // Leave whatever is on screen -- but say so. This catch once swallowed a
+    // ReferenceError and the page simply showed no tickets at all.
+    console.error("[portal] could not paint the ticket list:", e);
+  }
+}
+
+/* The VALUE stays the English category the server stores; only the label the
+   customer reads is translated. */
+function paintCategories(){
+  const keep = $("category").value;
+  $("category").innerHTML = CATEGORIES.map(c =>
+    `<option value="${esc(c)}">${esc(catText(c))}</option>`).join("");
+  if(keep) $("category").value = keep;
+}
+
+/* `pre` pre-fills the form when the customer arrives from a common issue,
+   so they do not have to classify a problem they already named. */
+function openModal(pre){
+  $("err").hidden = true;
+  $("formView").hidden = false;
+  $("doneView").hidden = true;
+  $("scrim").hidden = false;
+  if(pre && pre.category && CATEGORIES.includes(pre.category)){
+    $("category").value = pre.category;
+  }
+  if(pre && pre.subject && !$("subject").value) $("subject").value = pre.subject;
+  (pre && pre.subject ? $("description") : $("subject")).focus();
+}
+function closeModal(){
+  $("scrim").hidden = true;
+  $("form").reset();
+  $("descGhost").hidden = true;
+  $("descLow").hidden = true;
+  descSpoken = false;
+  SC.stopDictation();
+}
+
+$("newBtn").onclick = () => openModal();
+$("cancelBtn").onclick = closeModal;
+$("scrim").onclick = e => { if(e.target === $("scrim")) closeModal(); };
+document.addEventListener("keydown", e => {
+  if(e.key === "Escape" && !$("scrim").hidden) closeModal();
+});
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("err").hidden = true;
+  $("submitBtn").disabled = true;
+  $("submitBtn").innerHTML = '<span class="spin"></span>' + esc(T("modal.raising"));
+
+  let d;
+  try{
+    d = await (await fetch("/api/portal/tickets", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        subject: $("subject").value.trim(),
+        category: $("category").value,
+        description: $("description").value.trim(),
+        channel: descSpoken ? "voice" : "typed",
+      }),
+    })).json();
+  }catch(err){ d = {ok: false, error: T("err.unreachable")}; }
+
+  $("submitBtn").disabled = false;
+  $("submitBtn").textContent = T("modal.submit");
+
+  if(!d.ok){
+    $("err").textContent = d.error || T("err.couldNotRaise");
+    $("err").hidden = false;
+    return;
+  }
+
+  // The case id and a plain reassurance. No risk score, no analysis.
+  $("doneId").textContent = d.ticket.id;
+  $("formView").hidden = true;
+  $("doneView").hidden = false;
+  setTimeout(() => { location.href = "/portal/chat/" + d.ticket.id; }, 2000);
+});
+
+(async () => {
+  const params = new URLSearchParams(location.search);
+  if(params.get("error") === "not-your-ticket"){
+    $("notice").textContent = T("notice.notYours");
+    $("notice").hidden = false;
+  }
+
+  try{
+    const me = await (await fetch("/api/me")).json();
+    if(me && me.ok){
+      const u = me.user;
+      $("meName").textContent = u.display_name;
+      $("meRole").textContent = u.role;
+      $("meAv").textContent = (u.display_name || u.username).trim()[0].toUpperCase();
+      $("me").hidden = false;
+      ME = u.display_name || u.username;
+      $("vsub").textContent = T("tickets.welcome", {name: ME});
+    }
+  }catch(e){}
+
+  await load();
+})();
+
+$("signOut").onclick = async () => {
+  await fetch("/api/logout", {method: "POST"}).catch(() => {});
+  location.href = "/login";
+};
+
+/* ---------------- common issues ----------------
+   Every tag is a shortcut into a real conversation. A click raises a
+   ticket already filled in with that issue -- the customer's words are the
+   label they clicked, in their own language -- and goes straight to its
+   chat. There is no intermediate "looking that up" state to get stuck in.
+
+   The counts are live: /api/portal/faqs counts the saved cases on every
+   load, so a tag nobody uses shows no number rather than a made-up one. */
+
+let FAQS = [];
+let FAQ_OPEN = false;          // is the full list showing?
+const FAQ_FOLD = 9;            // three rows on a laptop, then "Show all"
+let OPENING = null;            // the tag whose ticket is being raised
+
+async function loadFaqs(){
+  try{
+    const d = await (await fetch("/api/portal/faqs")).json();
+    if(!d.ok || !d.faqs || !d.faqs.length) return;
+    FAQS = d.faqs;
+    paintFaqs();
+    $("faqs").hidden = false;
+  }catch(e){ /* the ticket list is the page; this card is a bonus */ }
+}
+
+function paintFaqs(){
+  const shown = FAQ_OPEN ? FAQS : FAQS.slice(0, FAQ_FOLD);
+  $("faqGrid").innerHTML = shown.map(f => `
+    <button class="faq" data-faq="${esc(f.id)}"${OPENING ? " disabled" : ""}>
+      <span class="em">${f.icon}</span>
+      <span class="lab">${esc(OPENING === f.id ? T("faq.opening") : f.label)}</span>
+      ${OPENING === f.id ? '<span class="spin dark"></span>'
+        : f.count ? `<span class="n">${f.count}</span>` : ""}
+    </button>`).join("");
+  $("faqGrid").querySelectorAll("[data-faq]").forEach(b => {
+    b.onclick = () => openFromTag(b.dataset.faq);
+  });
+
+  const more = FAQS.length - FAQ_FOLD;
+  $("faqMore").hidden = more <= 0;
+  $("faqMore").textContent = FAQ_OPEN ? T("faq.showFewer")
+                                      : T("faq.showAll", {n: FAQS.length});
+}
+
+function faqById(id){ return FAQS.find(f => f.id === id) || {}; }
+
+/* One click: a ticket in the backend, then its chat. The subject stays the
+   English label so the agent console and the Knowledge grouping keep reading
+   one vocabulary; the first message is what the customer actually saw. */
+async function openFromTag(id){
+  if(OPENING) return;
+  const faq = faqById(id);
+  OPENING = id;
+  $("faqOut").innerHTML = "";
+  paintFaqs();
+
+  let d;
+  try{
+    d = await (await fetch("/api/portal/tickets", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        subject: faq.english || faq.label,
+        category: faq.category,
+        description: faq.label,
+        channel: "typed",
+        tag: faq.id,
+      }),
+    })).json();
+  }catch(e){ d = {ok: false}; }
+
+  if(d && d.ok && d.ticket && d.ticket.id){
+    location.href = "/portal/chat/" + encodeURIComponent(d.ticket.id);
+    return;
+  }
+
+  // Never a dead end: say so plainly, and leave the tags usable.
+  OPENING = null;
+  paintFaqs();
+  $("faqOut").innerHTML = `<div class="notice" role="alert"></div>`;
+  $("faqOut").firstElementChild.textContent = (d && d.error) || T("faq.couldNotOpen");
+}
+
+$("faqMore").onclick = () => { FAQ_OPEN = !FAQ_OPEN; paintFaqs(); };
+
+/* ---------------- language + voice ---------------- */
+
+SC.mountVoiceToggle($("voiceToggle"));
+const descMic = SC.attachMic($("descMic"), $("description"), {
+  ghost: $("descGhost"), hint: $("descLow"),
+  onVoice: () => { descSpoken = true; },   // never submits; only labels
+});
+SC.onVoiceChange(on => {
+  on ? descMic.enable() : descMic.disable();
+});
+
+/* Every switch runs this, twice: once immediately from the seed or the
+   browser's own cache, and again if the server sends back a fuller
+   catalogue. It repaints, it never reloads. */
+SC.mountPicker($("langPick"), () => {
+  SC.paintStatic();                       // everything with a data-i18n key
+  if(ME) $("vsub").textContent = T("tickets.welcome", {name: ME});
+  paintCategories();
+  render();                               // the table, from the rows we hold
+  if($("descMic") && !$("descMic").disabled){
+    $("descMic").title = T("voice.speakInstead");
+  }
+  loadFaqs();                             // the tag labels are server-side data
+});
+</script>
+</body>
+</html>

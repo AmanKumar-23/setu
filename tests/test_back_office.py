@@ -30,18 +30,19 @@ def test_refund_lookup_for_an_order_without_one(core, back_office):
 
 
 def test_duplicate_refund_is_refused(core, back_office):
-    result = core.issue_refund("OD-4471")
+    result = core.initiate_refund("OD-4471")
     assert "error" in result
     assert "already exists" in result["error"]
 
 
-def test_password_reset_rejects_the_wrong_email(core, back_office):
-    assert "error" in core.send_password_reset("stranger@example.com")
+def test_reset_rejects_a_customer_who_is_not_on_the_account(core, back_office):
+    back_office["account"]["customer_id"] = "CU-1001"
+    assert "error" in core.reset_account_access("CU-9999")
 
 
 @pytest.mark.parametrize("name", [
     "check_order_status", "check_refund_status",
-    "issue_refund", "send_password_reset",
+    "initiate_refund", "expedite_delivery", "reset_account_access",
 ])
 def test_every_tool_is_declared_to_the_model(core, name):
     assert name in core.BACK_OFFICE
@@ -50,22 +51,70 @@ def test_every_tool_is_declared_to_the_model(core, name):
 
 def test_only_data_changing_tools_are_marked_as_writes(core):
     writes = {k for k, v in core.BACK_OFFICE.items() if v["writes"]}
-    assert writes == {"issue_refund", "send_password_reset"}
+    assert writes == {"initiate_refund", "expedite_delivery",
+                      "reset_account_access"}
+    assert writes == core.WRITE_TOOLS
 
 
-def test_issuing_a_refund_creates_one(core, back_office):
-    """A write tool really does change data -- which is why gather_facts()
-    refuses to run these without a human saying so."""
+# --------------------------------------------------------------------------
+# The three write tools, run directly -- which is what clicking Approve does
+# --------------------------------------------------------------------------
+def test_initiating_a_refund_creates_one(core, back_office):
     before = len(back_office["refunds"])
-    refund = core.issue_refund("OD-4468", reason="never arrived")
+    done = core.initiate_refund("OD-4468", reason="never arrived")
 
-    assert refund["order_id"] == "OD-4468"
-    assert refund["amount"] == 349
-    assert refund["status"] == "processing"
+    assert done["action"] == "initiate_refund"
+    assert done["reference"].startswith("RF-")
+    assert done["at"]
+    assert done["refund"]["order_id"] == "OD-4468"
+    assert done["refund"]["amount"] == 349
     assert len(back_office["refunds"]) == before + 1
 
 
-def test_password_reset_stamps_the_account(core, back_office):
-    result = core.send_password_reset("test@example.com")
-    assert result["sent_to"] == "test@example.com"
+def test_a_refund_can_be_partial(core, back_office):
+    done = core.initiate_refund("OD-4468", amount=100)
+    assert done["refund"]["amount"] == 100
+
+
+@pytest.mark.parametrize("amount", [0, -50, 9999])
+def test_a_refund_outside_the_order_total_is_refused(core, back_office, amount):
+    """The last thing between a click and the data, so it checks rather than
+    trusting whatever the UI sent."""
+    before = len(back_office["refunds"])
+    assert "error" in core.initiate_refund("OD-4468", amount=amount)
+    assert len(back_office["refunds"]) == before
+
+
+def test_expediting_moves_the_promised_date(core, back_office):
+    done = core.expedite_delivery("OD-4468")
+    assert done["reference"].startswith("EX-")
+    assert done["expected_on"]
+    order = next(o for o in back_office["orders"] if o["order_id"] == "OD-4468")
+    assert order["expedited"]["reference"] == done["reference"]
+
+
+def test_expediting_twice_is_refused(core, back_office):
+    core.expedite_delivery("OD-4468")
+    assert "error" in core.expedite_delivery("OD-4468")
+
+
+def test_expediting_an_unknown_order_is_an_error_not_an_exception(core, back_office):
+    assert "error" in core.expedite_delivery("OD-0000")
+
+
+def test_resetting_access_stamps_the_account(core, back_office):
+    done = core.reset_account_access()
+    assert done["reference"].startswith("AR-")
+    assert done["sent_to"] == "test@example.com"
     assert back_office["account"]["password_reset_sent_at"] is not None
+
+
+def test_every_write_tool_returns_a_reference_and_a_timestamp(core, back_office):
+    """The panel shows "Refund initiated - RF-9013 - by Rahul at 20:14", so
+    every write has to come back with something to put in it."""
+    for done in (core.initiate_refund("OD-4468"),
+                 core.expedite_delivery("OD-4468"),
+                 core.reset_account_access()):
+        assert done.get("reference"), done
+        assert done.get("at"), done
+        assert done.get("summary"), done

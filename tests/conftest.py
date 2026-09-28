@@ -24,6 +24,46 @@ def _load(name, path):
     return module
 
 
+class _NoNetworkClient:
+    """Stands in for google.genai.Client for the whole suite.
+
+    A test that forgets to stub a model call used to reach the REAL API
+    whenever this machine had a key in gemini_api_key.txt -- quietly, slowly,
+    and billed. Every escalation test did exactly that once handoff_message()
+    existed. With this in place such a test fails fast instead: the call raises
+    here, the coach turns it into ModelUnavailable, and whatever fallback the
+    app has is what the test sees.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.models = self
+
+    def generate_content(self, *args, **kwargs):
+        raise RuntimeError("the test suite makes no network calls; stub this")
+
+    embed_content = generate_content
+
+    def list(self, *args, **kwargs):
+        return []
+
+
+@pytest.fixture(autouse=True)
+def no_network(request, monkeypatch):
+    """Block the real Gemini client everywhere -- except the two semantic
+    search tests, which opt in explicitly with GEMINI_API_KEY set."""
+    if request.node.get_closest_marker("live_api") and os.getenv("GEMINI_API_KEY"):
+        return
+    # A placeholder key, so nothing goes looking for a real one. Without it
+    # the lookup falls through to the developer's gemini_api_key.txt -- which
+    # is how this suite passed locally and failed in CI -- and, on a machine
+    # with no key file, to a getpass prompt that has no terminal to read.
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    import coach_core
+    monkeypatch.setattr(coach_core.genai, "Client", _NoNetworkClient)
+    # A client built before the patch -- the embeddings one is cached.
+    monkeypatch.setattr(coach_core, "_embed_client", None, raising=False)
+
+
 @pytest.fixture(scope="session")
 def core():
     """The coaching engine, generated from the notebook."""
@@ -42,6 +82,10 @@ def srv(tmp_path):
     module.CASES_DB = str(tmp_path / "cases.db")
     module.CASES_FILE = str(tmp_path / "cases.json")
     module.init_db()
+    # The portal answers customers on a worker thread. Here it runs inline,
+    # so a test can assert on the reply the moment the request returns
+    # instead of racing a thread. tests/test_async_reply.py turns it off.
+    module.app.config["AI_INLINE"] = True
     return module
 
 

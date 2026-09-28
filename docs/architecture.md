@@ -2,6 +2,19 @@
 
 How the pieces fit, and why they are arranged this way.
 
+## Diagrams
+
+| Figure | What it shows |
+|---|---|
+| [**Setu at a glance**](architecture/fig0-overview.png) | The whole system drawn as a bridge: customer on one bank, support team on the other, Gemini above, SQLite beneath |
+| [**Containers**](architecture/fig1-containers.png) | Every browser page, route group, service and AI function, and the one HTTP boundary and one model client every call crosses |
+| [**One message, end to end**](architecture/fig2-message-lifecycle.png) | The 13 steps of a customer turn, and which of them the customer actually waits for |
+| [**Who answers**](architecture/fig3-who-answers.png) | The decision flow that picks the assistant or a person, with the severity scale |
+| [**Guarantees**](architecture/table1-guarantees.png) | Ten guarantees and the function that enforces each |
+
+Vector sources sit beside each PNG, and [`architecture/setu-architecture.html`](architecture/setu-architecture.html)
+is the whole sheet as one page.
+
 ---
 
 ## The notebook is the source of truth
@@ -53,38 +66,42 @@ differs from the committed file.
 
 ## Request flow
 
-A customer message arriving at `POST /api/customer`:
+A customer message arriving at `POST /api/portal/cases/<id>/message`. The customer waits for
+one database write; everything that touches the model happens after the request has returned.
 
 ```
-  browser
-     │  { "message": "mera recharge fail ho gaya" }
+  browser                                   the customer waits for this part only
+     │  { "text": "mera recharge fail ho gaya" }
      ▼
-  server.py
+  pipeline.record_customer_message()        save the message, mark ai_pending   ≈ 6 ms
+     │  200 ──► the chat shows "Setu is typing"
      │
-     ├─► 1. try_auto_resolve()      KB match ≥ 0.65 and low risk?  ──► answer, close, done
-     │
-     ├─► 2. AICoach.analyze_customer_message(msg, history)
-     │         redact ─► Gemini (structured output) ─► sentiment, urgency, risk, key issue
-     │
-     ├─► 3. AICoach.gather_facts(msg, history)
-     │         function-calling loop, up to 3 rounds:
-     │           model names a function ─► we run it ─► hand the result back ─► repeat
-     │         writes (issue_refund, send_password_reset) are recorded, NOT run,
-     │         unless allow_writes is on
-     │
-     ├─► 4. find_kb_article(msg)    embeddings + cosine, keyword fallback
-     │
-     ├─► 5. AICoach.suggest_reply(msg, history, analysis, facts)
-     │         grounded in the article and the real lookup results
-     │         ─► restore the redacted values back into the draft
-     │
-     └─► 6. save_case()             SQLite
-              │
-              ▼
-          { analysis, facts, article, suggestion, sla }
+     └─► AI_POOL.submit(case)               ThreadPoolExecutor × 4, one worker per case
+            │
+            ├─► 1. knowledge-gap check      embeddings; a miss is logged, never escalated
+            ├─► 2. analyze_customer_message(msg, history)
+            │         redact ─► Gemini (JSON schema) ─► sentiment, urgency, escalation risk,
+            │         frustration 0–100, trend, key issue, intent + confidence, emotion
+            ├─► 3. severity_of()            Low · Medium · High · Critical, with the rules that fired
+            ├─► 4. gather_facts()           read-only look-ups by function calling (skipped past 25 s)
+            ├─► 5. handover_reason()        High/Critical, a cancellation, a billing dispute or a
+            │                               proposed write ──► a person; else the assistant answers
+            ├─► 6. try_auto_resolve()       calm case + article match ≥ 0.65 ──► answer and close
+            ├─► 7. suggest_reply() / handoff_message()   in the customer's language
+            └─► 8. commit under the case lock           re-reads the case, keeps anything new
 ```
 
-Each of the numbered steps is one Gemini call except step 3, which is a loop.
+The console runs the same `respond_to_customer()` synchronously. There is one pipeline and two
+callers, not two implementations.
+
+**Language.** The reply language is detected per message — script ranges, Hindi/Marathi marker
+words, a Hinglish word list — so a customer who switches mid-conversation is answered in what
+they just used. Analysis stays in English, so the queue, the dashboard and the knowledge grouping
+read one vocabulary.
+
+**Write actions.** `allow_writes` decides which tool *declarations* are sent. Customers' turns
+never carry the write tools; on an agent's turn a call to one becomes a **proposal**, and only
+`POST /api/actions/<id>/decide` — an admin's click — ever runs it.
 
 ### The redaction boundary
 
@@ -113,10 +130,14 @@ JSON and function calling alike.
 
 | Failure | Response |
 |---|---|
-| `503`, `429`, `UNAVAILABLE`, `RESOURCE_EXHAUSTED` | Retry with backoff (1s, 2s, 4s), then fall back to `gemini-3.5-flash-lite` |
+| `503`, `429`, `500`, `UNAVAILABLE`, `RESOURCE_EXHAUSTED` | Retry with backoff (1 s, 2 s, 4 s), then fall back to the other model |
+| A dropped or timed-out connection | Retried like a busy server, rather than surfaced as a raw exception |
 | `400`, `401`, `403`, `INVALID_ARGUMENT` | Fail immediately — the request is malformed, so every other model rejects it identically |
-| A lookup fails | Recorded as `(lookup unavailable)`; the customer still gets a reply |
-| Gemini returns non-JSON | `_parse_json` fallback, though structured output makes this rare |
+| One request runs long | Abandoned at **20 s** and retried |
+| The whole call runs long | Stops at **45 s**; no attempt starts past the ceiling |
+| A slow turn | Skips the order look-up after 25 s and the bespoke handoff note after 35 s |
+| The model is unreachable | The case goes to a person with a "we have your message" note in the customer's language; the full error goes to the `setu` log under a short reference |
+| A look-up fails | The reply is written without it; the analysis is kept |
 
 Function calling has a tighter free-tier quota than ordinary generation, which is why it needs
 this more than the other paths do.
@@ -125,28 +146,22 @@ this more than the other paths do.
 
 ## Storage
 
-One SQLite table. Scalar columns are indexed for the queries the dashboard actually runs; the
-full case — transcript, timeline, redaction log, scores — is kept as a JSON blob alongside them.
+SQLite, six tables. `cases` keeps indexed scalar columns for the queries the dashboard actually
+runs and the full case — transcript, per-message analysis, timeline, redaction log, scores — as a
+JSON blob beside them.
 
-```sql
-CREATE TABLE cases (
-    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
-    id              TEXT UNIQUE NOT NULL,
-    status          TEXT,
-    escalation_risk TEXT,
-    sentiment       TEXT,
-    opened_at       TEXT,
-    closed_at       TEXT,
-    data            TEXT NOT NULL      -- the whole case as JSON
-);
-CREATE INDEX cases_status ON cases(status);
-CREATE INDEX cases_risk   ON cases(escalation_risk);
-CREATE INDEX cases_opened ON cases(opened_at);
-```
+| Table | Holds |
+|---|---|
+| `cases` | `id`, `status`, `escalation_risk`, `sentiment`, `opened_at`, `closed_at`, `owner`, `customer`, `subject`, `category`, `updated_at`, and the case as JSON |
+| `users` | Accounts, roles, scrypt hashes, lockout counters |
+| `settings` | The session signing key and other one-off values |
+| `actions` | Every proposed write action and who approved or refused it |
+| `usage` | Tokens and estimated cost per model call, by case, user and step |
+| `faq_misses` | Questions the knowledge base could not answer |
 
-That split keeps the dashboard's filters and aggregates in SQL while leaving the shape of a case
-free to change without a migration for every field. `migrate_from_json()` imports the older
-`cases.json` on first run; JSON and CSV export still work.
+Columns added after the first release are applied by `ALTER TABLE` on start, so an older database
+upgrades in place. `migrate_from_json()` imports the original `cases.json` on first run; JSON and
+CSV export still work.
 
 ---
 
@@ -156,11 +171,17 @@ Vanilla JavaScript and inline SVG — no framework, no build step, no `node_modu
 
 | File | What it is |
 |---|---|
-| `app/static/index.html` | The live console the agent works in |
-| `app/static/dashboard.html` | Ten panels, work queue first, plus the case detail drawer |
+| `app/static/login.html` | Sign in by email or username, role cards, sign-up for customers, one-click demo accounts |
+| `app/static/portal.html` | The customer's tickets, issue tags and FAQ card |
+| `app/static/portal-chat.html` | One conversation: typing indicator, dictation, Play, language switching in place |
+| `app/static/profile.html` | The customer's details and password |
+| `app/static/index.html` | The agent console: escalated queue, conversation, live intelligence, scorecard |
+| `app/static/dashboard.html` | Eight sections (Overview, Work queue, Breaching soon, Cases, Trends, Knowledge, Actions, Cost) |
+| `app/static/i18n.js` | The UI catalogue: English and a hand-written Hindi seed; other languages translated once and cached |
+| `app/static/voice.js` | Browser speech recognition and synthesis, shared by the portal and the console |
 
 Charts are drawn as inline SVG in the page's own style rather than pulled from a charting
-library, which keeps the whole front end two files a contributor can read end to end.
+library, so every page is one file a contributor can read end to end.
 
 ---
 
@@ -172,12 +193,21 @@ only decorates.
 ### Roles are ranked, not enumerated
 
 ```
-agent  (1)  ──►  lead  (2)  ──►  admin  (3)
+customer (0)      agent (1)  ──►  admin (2)
+   │                                  
+   └── its own workspace, off the staff ladder entirely
 ```
 
-Each role is a superset of the one below, so a guard asks "at least `lead`?" rather than "in this
-set of roles?". A set would let someone hold `admin` without holding `lead`, and every check
-would have to remember to list both. Ranking makes that gap unrepresentable.
+Among STAFF, each role is a superset of the one below, so a guard asks "at least `agent`?"
+rather than "in this set of roles?". A set would let someone hold `admin` without holding
+`agent`, and every check would have to remember to list both. Ranking makes that gap
+unrepresentable.
+
+A customer is **not** the bottom of that ladder. They are a different audience who must be kept
+out of the console, not let in with fewer buttons. Rank 0 is what makes every staff guard
+exclude them without one of those guards being edited — and `/portal` is guarded by
+`require_exact("customer")` rather than a floor, because a floor would let an admin, who
+outranks a customer, wander into the customer's workspace.
 
 The whole policy is one dict in `server.py` — sixteen routes, each with the role it needs —
 rather than a decorator argument scattered down nine hundred lines. It can be read, and audited,
@@ -253,10 +283,9 @@ overshoot slightly; the next is refused with a 429.
 This is a coursework and demonstration project, and it is worth being explicit about what it is
 not:
 
-- **One live conversation for the whole server.** `LiveSession` is a module-level singleton, so
-  two signed-in agents share a console. Roles decide what each may *reach*; they do not yet give
-  each agent their own session. That is the next structural change, and the `owner` column on
-  `cases` exists to meet it.
+- **One process.** The portal builds a short-lived session per request, but the console still
+  keeps one live session per process, and the per-case locks and the worker queue live in
+  memory. It does not scale out across machines as it stands.
 - **No per-request CSRF tokens.** `SameSite=Lax` cookies cover the realistic attack; tokens
   cover the rest.
 - **The shipped token prices are placeholders.** Token counts are measured and correct; the
@@ -268,5 +297,7 @@ not:
 - **Thresholds come from a small sample.** `0.58` and `0.65` were measured, and the measurements
   are in the notebook, but the sample is small enough that they should be re-measured before
   anyone relies on them.
-- **One language pair tested.** The Hinglish finding is real and reproduced; whether it repeats
-  in Tamil, Bengali or Marathi is untested, and measuring it would be a genuine contribution.
+- **One language pair measured.** Replies work in ten languages plus Hinglish, but the
+  sentiment finding was measured on Hinglish only; whether it repeats in Tamil, Bengali or
+  Marathi is untested, and measuring it would be a genuine contribution.
+- **Street addresses are not redacted.** Email, card numbers, order ids and phone numbers are.

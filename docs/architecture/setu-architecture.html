@@ -1,0 +1,1289 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0">
+<title>Setu Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap">
+<style>
+:root{
+  --sans:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --deva:"Noto Sans Devanagari","Mukta","Nirmala UI","Mangal",sans-serif;
+
+  --bg:#F4F5F7; --surface:#FFFFFF; --surface-2:#F8F9FB;
+  --ink:#14161B; --ink2:#454B57; --ink3:#747B88;
+  --line:#D8DCE3; --line-2:#C3C9D2;
+  --accent:#E0431F; --accent-bg:#FCEDE8;
+  --violet:#5445D1; --violet-l:#B9B1F2; --violet-bg:#EFEDFC;
+  --green:#15805A; --green-bg:#E6F4EE;
+  --warn:#9A6212; --warn-bg:#FCF4E4; --warn-l:#E9CF9E;
+  --z-br:#EEF2F8; --z-br-l:#D2DBE9;
+  --z-sv:#FCF3EF; --z-sv-l:#F0D5C9;
+  --z-ai:#F2F0FC; --z-ai-l:#D8D2F5;
+  --z-gg:#EFF1F4; --z-gg-l:#D5DAE1;
+  --z-db:#ECF6F1; --z-db-l:#C6E2D4;
+  --boundary:#FBE2D8; --boundary-l:#EDB7A3;
+  --redact:#E7E3FB; --model:#DBD5FA;
+  --crit:#B42318; --crit-bg:#FDECEA;
+  --high:#C2410C; --high-bg:#FDEEE6;
+  --med:#9A6212; --med-bg:#FCF4E4;
+  --low:#15805A; --low-bg:#E6F4EE;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0D0F13; --surface:#161920; --surface-2:#1B1F27;
+    --ink:#E9EBF0; --ink2:#AEB4BF; --ink3:#838A97;
+    --line:#2A2F39; --line-2:#394050;
+    --accent:#FF6B48; --accent-bg:#2B1812;
+    --violet:#A497FF; --violet-l:#4A4290; --violet-bg:#1D1936;
+    --green:#45C28C; --green-bg:#11261D;
+    --warn:#E5A93D; --warn-bg:#2A2212; --warn-l:#5A4520;
+    --z-br:#121823; --z-br-l:#26334B;
+    --z-sv:#1C1411; --z-sv-l:#4A2C22;
+    --z-ai:#16132A; --z-ai-l:#352D64;
+    --z-gg:#15181D; --z-gg-l:#2B313B;
+    --z-db:#0F1B16; --z-db-l:#224639;
+    --boundary:#3A1E15; --boundary-l:#7A3A26;
+    --redact:#26214A; --model:#2F2862;
+    --crit:#FF7A6E; --crit-bg:#2D1412;
+    --high:#FF8A4C; --high-bg:#2B1810;
+    --med:#E5A93D; --med-bg:#2A2212;
+    --low:#45C28C; --low-bg:#11261D;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0D0F13; --surface:#161920; --surface-2:#1B1F27;
+  --ink:#E9EBF0; --ink2:#AEB4BF; --ink3:#838A97;
+  --line:#2A2F39; --line-2:#394050;
+  --accent:#FF6B48; --accent-bg:#2B1812;
+  --violet:#A497FF; --violet-l:#4A4290; --violet-bg:#1D1936;
+  --green:#45C28C; --green-bg:#11261D;
+  --warn:#E5A93D; --warn-bg:#2A2212; --warn-l:#5A4520;
+  --z-br:#121823; --z-br-l:#26334B;
+  --z-sv:#1C1411; --z-sv-l:#4A2C22;
+  --z-ai:#16132A; --z-ai-l:#352D64;
+  --z-gg:#15181D; --z-gg-l:#2B313B;
+  --z-db:#0F1B16; --z-db-l:#224639;
+  --boundary:#3A1E15; --boundary-l:#7A3A26;
+  --redact:#26214A; --model:#2F2862;
+  --crit:#FF7A6E; --crit-bg:#2D1412;
+  --high:#FF8A4C; --high-bg:#2B1810;
+  --med:#E5A93D; --med-bg:#2A2212;
+  --low:#45C28C; --low-bg:#11261D;
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;
+  line-height:1.55;-webkit-font-smoothing:antialiased}
+.page{max-width:1760px;margin:0 auto;padding-inline:24px;padding-block:32px 56px;
+  display:grid;gap:40px}
+@media (max-width:600px){ .page{padding-inline:16px;padding-block:20px 40px;gap:32px} }
+
+/* ---------- header ---------- */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px 40px;align-items:end;
+  padding-bottom:28px;border-bottom:1px solid var(--line)}
+@media (max-width:900px){ .masthead{grid-template-columns:1fr} }
+.brand{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.mark{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;flex:0 0 auto;
+  background:linear-gradient(140deg,#FF6B3D,#E8492A 58%,#C9381A);color:#fff;
+  font-family:var(--deva);font-weight:700;font-size:26px;line-height:1}
+.mark span{display:block;transform:translateY(3px)}
+.wordmark{font-weight:600;font-size:17px;letter-spacing:-.01em}
+.wordmark .deva{font-family:var(--deva);font-weight:700}
+.eyebrow{font-family:var(--mono);font-size:12px;color:var(--ink3);letter-spacing:.04em}
+h1{font-size:clamp(28px,3.4vw,40px);line-height:1.1;letter-spacing:-.025em;font-weight:600;
+  margin:0 0 12px;text-wrap:balance}
+.lede{max-width:68ch;color:var(--ink2);margin:0;font-size:16px}
+.facts{display:grid;grid-template-columns:repeat(3,auto);gap:10px 28px;margin:0}
+@media (max-width:600px){ .facts{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.facts div{display:grid;gap:2px}
+.facts dt{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
+.facts dd{margin:0;font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
+
+/* ---------- sheets ---------- */
+section{display:grid;gap:14px}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.sheet-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px 24px;flex-wrap:wrap;
+  padding:14px 20px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.sheet-head h2{margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em}
+.sheet-head h2 .fig{font-family:var(--mono);font-weight:500;color:var(--ink3);margin-right:10px;font-size:13px}
+.drawno{font-family:var(--mono);font-size:11.5px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.dg{display:block;width:100%;height:auto;min-width:1120px}
+.dg.narrow{min-width:760px}
+figure{margin:0}
+figcaption{max-width:90ch;color:var(--ink2);font-size:14px;padding:14px 20px 18px;border-top:1px solid var(--line)}
+figcaption strong{color:var(--ink);font-weight:600}
+.hint{display:none;font-size:12px;color:var(--ink3);padding:8px 20px 0}
+@media (max-width:1100px){ .hint{display:block} }
+
+.pair{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:1100px){ .pair{grid-template-columns:1fr} }
+
+/* ---------- severity panel ---------- */
+.sev{padding:18px 20px;display:grid;gap:12px}
+.sev h3{margin:0 0 2px;font-size:14px;font-weight:600}
+.sev p.sub{margin:0 0 6px;font-size:13px;color:var(--ink2)}
+.level{display:grid;grid-template-columns:86px minmax(0,1fr);gap:12px;align-items:start;
+  padding:10px 0;border-top:1px solid var(--line)}
+.pill{display:inline-flex;align-items:center;gap:6px;justify-content:center;border-radius:999px;
+  font-size:11.5px;font-weight:600;padding:3px 10px}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.p-crit{background:var(--crit-bg);color:var(--crit)}
+.p-high{background:var(--high-bg);color:var(--high)}
+.p-med{background:var(--med-bg);color:var(--med)}
+.p-low{background:var(--low-bg);color:var(--low)}
+.level ul{margin:0;padding-left:16px;font-size:13px;color:var(--ink2)}
+.level .act{font-size:12px;color:var(--ink3);margin-top:4px;display:flex;align-items:center;gap:6px}
+.level .act.person{color:var(--accent)} .level .act.ai{color:var(--violet)}
+.sev .note{font-size:12.5px;color:var(--ink3);border-top:1px solid var(--line);padding-top:12px;margin:0}
+code{font-family:var(--mono);font-size:.88em}
+
+/* ---------- guarantees ---------- */
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px;min-width:760px}
+th,td{text-align:left;padding:12px 20px;border-top:1px solid var(--line);vertical-align:top}
+thead th{border-top:0;font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink3);background:var(--surface-2);padding-block:10px}
+td:first-child{font-weight:600;width:30%}
+td:nth-child(2){color:var(--ink2);width:44%}
+td:last-child{font-family:var(--mono);font-size:12.5px;color:var(--ink3)}
+
+.limits{padding:18px 20px 20px;display:grid;gap:10px}
+.limits h3{margin:0;font-size:14px;font-weight:600}
+.limits ul{margin:0;padding-left:18px;display:grid;gap:6px;color:var(--ink2);max-width:92ch}
+footer{font-size:12.5px;color:var(--ink3);font-family:var(--mono)}
+
+/* ---------- inside the drawings ---------- */
+.dg text{font-family:var(--sans)}
+.z{stroke-width:1}
+.z-br{fill:var(--z-br);stroke:var(--z-br-l)}
+.z-sv{fill:var(--z-sv);stroke:var(--z-sv-l)}
+.z-ai{fill:var(--z-ai);stroke:var(--z-ai-l)}
+.z-gg{fill:var(--z-gg);stroke:var(--z-gg-l)}
+.z-db{fill:var(--z-db);stroke:var(--z-db-l)}
+.z-op{fill:var(--surface-2);stroke:var(--line)}
+.box{fill:var(--surface);stroke:var(--line-2);stroke-width:1}
+.box-acc{fill:var(--surface);stroke:var(--accent);stroke-width:1.5}
+.box-vio{fill:var(--surface);stroke:var(--violet);stroke-width:1.3}
+.box-grn{fill:var(--surface);stroke:var(--green);stroke-width:1.5}
+.box-warn{fill:var(--warn-bg);stroke:var(--warn-l);stroke-width:1}
+.box-api{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1;stroke-dasharray:4 3}
+.box-sub{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1}
+.box-note{fill:none;stroke:var(--z-ai-l);stroke-width:1;stroke-dasharray:4 3}
+.pill-lock{fill:var(--accent-bg);stroke:var(--boundary-l);stroke-width:1}
+.boundary{fill:var(--boundary);stroke:var(--boundary-l);stroke-width:1}
+.redact{fill:var(--redact);stroke:var(--violet-l);stroke-width:1}
+.model{fill:var(--model);stroke:var(--violet);stroke-width:1.2}
+.chip{fill:var(--surface);stroke:var(--z-db-l);stroke-width:1}
+.head{fill:var(--surface);stroke:var(--line-2);stroke-width:1}
+.head-acc{fill:var(--accent-bg);stroke:var(--accent);stroke-width:1.2}
+.head-vio{fill:var(--violet-bg);stroke:var(--violet);stroke-width:1.2}
+.act-bar{fill:var(--accent-bg);stroke:var(--accent);stroke-width:1}
+.decide{fill:var(--surface);stroke:var(--line-2);stroke-width:1.2}
+.out-person{fill:var(--accent-bg);stroke:var(--accent);stroke-width:1.3}
+.out-ai{fill:var(--violet-bg);stroke:var(--violet);stroke-width:1.3}
+.start{fill:var(--surface-2);stroke:var(--ink3);stroke-width:1}
+
+.zt{font-size:11px;font-weight:600;letter-spacing:.14em;fill:var(--ink)}
+.zs{font-family:var(--mono)!important;font-size:10px;fill:var(--ink3)}
+.tt{font-size:12.5px;font-weight:600;fill:var(--ink)}
+.tt-acc{font-size:12.5px;font-weight:600;fill:var(--accent)}
+.tt-grn{font-size:12.5px;font-weight:600;fill:var(--green)}
+.tt-warn{font-size:12.5px;font-weight:600;fill:var(--warn)}
+.tb{font-size:10.5px;fill:var(--ink2)}
+.tb-strong{font-size:10.5px;font-weight:600;fill:var(--green)}
+.tm{font-family:var(--mono)!important;font-size:10px;fill:var(--ink3)}
+.tm-ink{font-family:var(--mono)!important;font-size:10.5px;font-weight:500;fill:var(--ink)}
+.tm-big{font-family:var(--mono)!important;font-size:12px;font-weight:500;fill:var(--ink)}
+.cap{font-size:9.5px;font-weight:600;letter-spacing:.12em;fill:var(--ink3)}
+.bt{font-family:var(--mono)!important;font-size:9.5px;letter-spacing:.03em;fill:var(--ink2)}
+.bt-strong{font-family:var(--mono)!important;font-size:9.5px;font-weight:500;letter-spacing:.08em;fill:var(--ink)}
+.lbl{font-size:10px;font-weight:500;fill:var(--ink2)}
+.lbl-acc{font-size:10px;font-weight:600;fill:var(--accent)}
+.lbl-vio{font-size:10px;font-weight:600;fill:var(--violet)}
+.lbl-grn{font-size:10px;font-weight:600;fill:var(--green)}
+.lbl-dim{font-family:var(--mono)!important;font-size:9.5px;fill:var(--ink3)}
+.ln{fill:none;stroke:var(--ink2);stroke-width:1.3}
+.ln-ret{fill:none;stroke:var(--ink2);stroke-width:1.3;stroke-dasharray:5 4}
+.ln-acc{fill:none;stroke:var(--accent);stroke-width:1.7;stroke-dasharray:6 4}
+.ln-vio{fill:none;stroke:var(--violet);stroke-width:1.6}
+.ln-dot{fill:none;stroke:var(--ink3);stroke-width:1.3;stroke-dasharray:2 4}
+.ln-grn{fill:none;stroke:var(--green);stroke-width:1.6}
+.ln-life{stroke:var(--line-2);stroke-width:1;stroke-dasharray:3 5}
+.mk-ink{fill:var(--ink2)} .mk-acc{fill:var(--accent)} .mk-vio{fill:var(--violet)}
+.mk-dot{fill:var(--ink3)} .mk-grn{fill:var(--green)}
+.node{fill:var(--accent)}
+.badge{fill:var(--ink)} .badge-t{fill:var(--bg);font-size:10px;font-weight:700}
+.tag{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1}
+.sw-person{fill:var(--accent)} .sw-ai{fill:var(--violet)}
+
+/* ---------- pictograms ---------- */
+.ic{fill:none;stroke:var(--ink2);stroke-linecap:round;stroke-linejoin:round}
+.ic-acc{stroke:var(--accent)} .ic-vio{stroke:var(--violet)} .ic-grn{stroke:var(--green)}
+.ic-warn{stroke:var(--warn)} .ic-inv{stroke:#FFFFFF}
+.bdg{fill:var(--surface);stroke:var(--line-2);stroke-width:1}
+.bdg-acc{fill:var(--accent-bg);stroke:var(--boundary-l);stroke-width:1}
+.bdg-vio{fill:var(--violet-bg);stroke:var(--violet-l);stroke-width:1}
+.bdg-grn{fill:var(--green-bg);stroke:var(--z-db-l);stroke-width:1}
+.bdg-warn{fill:var(--warn-bg);stroke:var(--warn-l);stroke-width:1}
+.halo{paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+
+/* ---------- the overview drawing ---------- */
+.phone{fill:var(--surface);stroke:var(--ink2);stroke-width:1.6}
+.slot{fill:var(--line-2)}
+.hr{stroke:var(--line);stroke-width:1}
+.bub-me{fill:var(--accent-bg);stroke:var(--boundary-l);stroke-width:1}
+.bub-ai{fill:var(--violet-bg);stroke:var(--violet-l);stroke-width:1}
+.bub-typ{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1}
+.play{fill:var(--surface);stroke:var(--violet-l);stroke-width:1}
+.mic-bg{fill:var(--accent)}
+.dots{fill:var(--ink3)}
+.dev{font-family:var(--deva)!important;font-size:10.5px;font-weight:400;fill:var(--ink)}
+.dev-s{font-family:var(--deva)!important;font-size:9px;font-weight:600;fill:var(--ink2)}
+.brand-sq{fill:var(--accent)}
+.brand-t{font-family:var(--deva)!important;font-size:10.5px;font-weight:700;fill:#FFFFFF}
+.ph-t{font-size:11px;font-weight:600;fill:var(--ink)}
+.deck{fill:var(--accent)}
+.deck-t{font-size:10px;font-weight:600;letter-spacing:.14em;fill:#FFFFFF}
+.dg .dv{font-family:var(--deva);font-size:11.5px;letter-spacing:0}
+.arch-band{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1.2}
+.col{stroke:var(--line-2);stroke-width:1.4}
+.pier{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1}
+.water{fill:none;stroke:var(--z-br-l);stroke-width:1.6;stroke-linecap:round}
+.cloud{fill:var(--violet-bg);stroke:var(--violet);stroke-width:1.3}
+.cyl{fill:var(--z-db);stroke:var(--green);stroke-width:1.3}
+.cyl-top{fill:var(--green-bg);stroke:var(--green);stroke-width:1.3}
+.av-acc{fill:var(--accent-bg);stroke:var(--accent);stroke-width:1.2}
+.av-grn{fill:var(--green-bg);stroke:var(--green);stroke-width:1.2}
+.row{fill:var(--surface-2);stroke:var(--line);stroke-width:1}
+.pl-crit{fill:var(--crit-bg)} .pl-high{fill:var(--high-bg)} .pl-med{fill:var(--med-bg)}
+.plt-crit{font-size:9px;font-weight:600;fill:var(--crit)}
+.plt-high{font-size:9px;font-weight:600;fill:var(--high)}
+.plt-med{font-size:9px;font-weight:600;fill:var(--med)}
+.tt-s{font-size:11.5px;font-weight:600;fill:var(--ink)}
+.btn-ok{fill:var(--green)} .btn-no{fill:var(--surface);stroke:var(--line-2);stroke-width:1}
+.btn-t{font-size:9.5px;font-weight:600;fill:#FFFFFF}
+.btn-t2{font-size:9.5px;font-weight:600;fill:var(--ink2)}
+.bar{fill:var(--violet-l)} .bar-hi{fill:var(--violet)}
+
+/* ---------- icons in the page text ---------- */
+.ti{width:14px;height:14px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round}
+.gcell{display:flex;align-items:center;gap:12px}
+.gi{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto;
+  background:var(--accent-bg);color:var(--accent)}
+.gi .ti{width:16px;height:16px}
+.limits h3{display:flex;align-items:center;gap:8px}
+.limits h3 .ti{color:var(--warn)}
+
+@media (prefers-reduced-motion: no-preference){
+  .ln-acc{animation:flow 1.6s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-20}}
+}
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div>
+      <div class="brand">
+        <div class="mark" aria-hidden="true"><span>से</span></div>
+        <div>
+          <div class="wordmark"><span class="deva">सेतु</span> · Setu</div>
+          <div class="eyebrow">SETU-ARCH-01 · system architecture</div>
+        </div>
+      </div>
+      <h1>How Setu answers a customer, and when it hands them to a person</h1>
+      <p class="lede">Setu is an AI customer-support desk for India. One Flask process serves three workspaces. A background worker does all the model work, so a customer never waits on it. Every model call leaves through one client that redacts personal data first, retries, stays inside a time limit, and is metered.</p>
+    </div>
+    <dl class="facts">
+      <div><dt>Server</dt><dd>Python 3.11+ · Flask</dd></div>
+      <div><dt>Store</dt><dd>SQLite · 6 tables</dd></div>
+      <div><dt>Models</dt><dd>Gemini 3.5 flash-lite</dd></div>
+      <div><dt>Languages</dt><dd>10 + Hinglish</dd></div>
+      <div><dt>Code</dt><dd>8.3k py · 8.2k web</dd></div>
+      <div><dt>Tests</dt><dd>521 · offline</dd></div>
+    </dl>
+  </header>
+
+  <!-- ================================================================== -->
+  <!--  FIGURE 0 — the overview, drawn                                      -->
+  <!-- ================================================================== -->
+  <section aria-labelledby="f0-title" id="overview">
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="f0-title"><span class="fig">Fig. 0</span>Setu at a glance: the bridge between a customer and the right help</h2>
+        <span class="drawno">overview · illustrated</span>
+      </div>
+      <p class="hint">Scroll sideways to see the whole drawing.</p>
+      <figure>
+        <div class="scroll">
+<svg class="dg" viewBox="0 0 1640 600" role="img" aria-label="Illustrated overview of Setu, drawn as a bridge. On the left a customer writes or speaks in their own language on a phone. The message crosses the bridge: the Flask server saves it, a background AI worker asks Google Gemini through a PII shield and one time-boxed, metered model client, and the decision engine either lets the assistant reply or hands high and critical cases, cancellations and billing disputes to an agent on the right. A write the model proposes on an agent's turn waits for an admin, and only an approved action changes orders.json. Cases live in SQLite beneath the bridge.">
+  <defs>
+    <marker id="f0-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-ink"/></marker>
+    <marker id="f0-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-acc"/></marker>
+    <marker id="f0-vio" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-vio"/></marker>
+    <marker id="f0-grn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-grn"/></marker>
+    <marker id="f0-dot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mk-dot"/></marker>
+  </defs>
+
+  <!-- the gap Setu spans -->
+  <path class="water" d="M340 540 q20 -5 40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0"/>
+  <path class="water" d="M380 556 q20 -5 40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0"/>
+  <rect class="pier" x="404" y="498" width="32" height="30" rx="3"/>
+  <rect class="pier" x="1180" y="498" width="32" height="30" rx="3"/>
+  <path class="arch-band" d="M420 500 Q808 124 1196 500 L1180 500 Q808 150 436 500 Z"/>
+  <line class="col" x1="688" y1="312" x2="688" y2="330.0"/>
+  <line class="col" x1="928" y1="312" x2="928" y2="330.0"/>
+  <line class="col" x1="628" y1="312" x2="628" y2="352.5"/>
+  <line class="col" x1="988" y1="312" x2="988" y2="352.5"/>
+  <line class="col" x1="568" y1="312" x2="568" y2="383.9"/>
+  <line class="col" x1="1048" y1="312" x2="1048" y2="383.9"/>
+  <line class="col" x1="508" y1="312" x2="508" y2="424.4"/>
+  <line class="col" x1="1108" y1="312" x2="1108" y2="424.4"/>
+  <line class="col" x1="448" y1="312" x2="448" y2="473.8"/>
+  <line class="col" x1="1168" y1="312" x2="1168" y2="473.8"/>
+  <rect class="deck" x="324" y="294" width="992" height="18"/>
+  <text class="deck-t" x="808" y="307" text-anchor="middle"><tspan class="dv">सेतु</tspan>  ·  SETU  ·  THE BRIDGE BETWEEN A CUSTOMER AND THE RIGHT HELP</text>
+
+  <!-- customer -->
+  <rect class="z z-br" x="24" y="24" width="300" height="552" rx="16"/>
+  <rect class="bdg" x="40" y="40" width="30" height="30" rx="8.4"/><g class="ic" transform="translate(46 46) scale(0.75)" style="stroke-width:2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7"/></g>
+  <text class="zt" x="80" y="54">CUSTOMER</text>
+  <text class="zs" x="80" y="70">portal · chat · profile</text>
+  <rect class="phone" x="99" y="94" width="150" height="262" rx="22"/>
+  <rect class="slot" x="154" y="101" width="40" height="4" rx="2"/>
+  <rect class="brand-sq" x="111" y="113" width="20" height="20" rx="6"/>
+  <text class="brand-t" x="121" y="127.5" text-anchor="middle">से</text>
+  <text class="ph-t" x="137" y="127">Setu</text>
+  <rect class="bub-typ" x="197" y="114" width="42" height="18" rx="9"/>
+  <text class="dev-s" x="218" y="126.5" text-anchor="middle">हिंदी</text>
+  <line class="hr" x1="107" y1="141" x2="241" y2="141"/>
+  <rect class="bub-me" x="135" y="151" width="106" height="42" rx="10"/>
+  <text class="dev" x="233" y="168" text-anchor="end">रिचार्ज फेल हुआ,</text>
+  <text class="dev" x="233" y="184" text-anchor="end">पैसे कट गए</text>
+  <rect class="bub-ai" x="107" y="201" width="108" height="42" rx="10"/>
+  <text class="dev" x="115" y="218">चिंता न करें,</text>
+  <text class="dev" x="115" y="234">हम देख रहे हैं।</text>
+  <circle class="play" cx="230" cy="222" r="10"/>
+  <g class="ic ic-vio" transform="translate(224 216) scale(0.5)" style="stroke-width:3"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/><path d="M18 7a7 7 0 0 1 0 10"/></g>
+  <rect class="bub-typ" x="107" y="253" width="48" height="22" rx="11"/>
+  <circle class="dots" cx="121" cy="264" r="2.6"/>
+  <circle class="dots" cx="131" cy="264" r="2.6"/>
+  <circle class="dots" cx="141" cy="264" r="2.6"/>
+  <rect class="bub-typ" x="107" y="318" width="134" height="28" rx="14"/>
+  <rect class="slot" x="119" y="330" width="64" height="4" rx="2"/>
+  <circle class="mic-bg" cx="226" cy="332" r="10"/>
+  <g class="ic ic-inv" transform="translate(220 326) scale(0.5)" style="stroke-width:3.2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M9 21h6"/></g>
+  <rect class="bdg" x="40" y="380" width="28" height="28" rx="7.84"/><g class="ic" transform="translate(45.5 385.5) scale(0.7083)" style="stroke-width:2.12"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></g>
+  <text class="tt" x="80" y="392">10 languages + Hinglish</text>
+  <text class="tb" x="80" y="407">the reply follows how they write</text>
+  <rect class="bdg" x="40" y="428" width="28" height="28" rx="7.84"/><g class="ic" transform="translate(45.5 433.5) scale(0.7083)" style="stroke-width:2.12"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M9 21h6"/></g>
+  <text class="tt" x="80" y="440">Speak or type</text>
+  <text class="tb" x="80" y="455">dictation fills the box, never sends</text>
+  <rect class="bdg" x="40" y="476" width="28" height="28" rx="7.84"/><g class="ic" transform="translate(45.5 481.5) scale(0.7083)" style="stroke-width:2.12"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/><path d="M18 7a7 7 0 0 1 0 10"/></g>
+  <text class="tt" x="80" y="488">Hear the reply</text>
+  <text class="tb" x="80" y="503">Play reads any answer aloud</text>
+  <rect class="bdg" x="40" y="524" width="28" height="28" rx="7.84"/><g class="ic" transform="translate(45.5 529.5) scale(0.7083)" style="stroke-width:2.12"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.6"/><path d="M12 17h.01"/></g>
+  <text class="tt" x="80" y="536">Common questions</text>
+  <text class="tb" x="80" y="551">an FAQ card on the portal</text>
+
+  <!-- support team -->
+  <rect class="z z-sv" x="1316" y="24" width="300" height="552" rx="16"/>
+  <rect class="bdg-acc" x="1332" y="40" width="30" height="30" rx="8.4"/><g class="ic ic-acc" transform="translate(1338 46) scale(0.75)" style="stroke-width:2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18 14.3c2.2.7 3.5 2.8 3.5 5.7"/></g>
+  <text class="zt" x="1372" y="54">SUPPORT TEAM</text>
+  <text class="zs" x="1372" y="70">agent console · admin dashboard</text>
+  <rect class="box" x="1332" y="94" width="268" height="222" rx="14"/>
+  <circle class="av-acc" cx="1366" cy="128" r="20"/>
+  <g class="ic ic-acc" transform="translate(1355 117) scale(0.9167)" style="stroke-width:1.64"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="13" width="4" height="6" rx="1.5"/><rect x="17" y="13" width="4" height="6" rx="1.5"/><path d="M19 19v.5a2.5 2.5 0 0 1-2.5 2.5H13"/></g>
+  <text class="tt" x="1396" y="124">Agent</text>
+  <text class="tm" x="1396" y="140">index.html</text>
+  <text class="cap" x="1348" y="174">QUEUE · MOST SEVERE FIRST</text>
+  <rect class="row" x="1348" y="184" width="236" height="24" rx="6"/>
+  <rect class="pl-crit" x="1354" y="189" width="54" height="14" rx="7"/>
+  <text class="plt-crit" x="1381" y="199.5" text-anchor="middle">Critical</text>
+  <text class="tm-ink" x="1414" y="200">SC-2031</text>
+  <text class="tb" x="1466" y="200">legal threat</text>
+  <text class="tm" x="1576" y="200" text-anchor="end">6 min</text>
+  <rect class="row" x="1348" y="214" width="236" height="24" rx="6"/>
+  <rect class="pl-high" x="1354" y="219" width="54" height="14" rx="7"/>
+  <text class="plt-high" x="1381" y="229.5" text-anchor="middle">High</text>
+  <text class="tm-ink" x="1414" y="230">SC-2027</text>
+  <text class="tb" x="1466" y="230">cancellation</text>
+  <text class="tm" x="1576" y="230" text-anchor="end">21 min</text>
+  <rect class="row" x="1348" y="244" width="236" height="24" rx="6"/>
+  <rect class="pl-med" x="1354" y="249" width="54" height="14" rx="7"/>
+  <text class="plt-med" x="1381" y="259.5" text-anchor="middle">Medium</text>
+  <text class="tm-ink" x="1414" y="260">SC-2034</text>
+  <text class="tb" x="1466" y="260">late refund</text>
+  <text class="tm" x="1576" y="260" text-anchor="end">35 min</text>
+  <text class="tb" x="1348" y="290">English gloss of every message</text>
+  <text class="tb" x="1348" y="305">each reply scored 1–10, with a tip</text>
+  <path class="ln" d="M1566 316 V330" marker-end="url(#f0-ink)"/>
+  <text class="lbl" x="1556" y="327" text-anchor="end">a write is proposed</text>
+  <rect class="box" x="1332" y="332" width="268" height="228" rx="14"/>
+  <circle class="av-grn" cx="1366" cy="366" r="20"/>
+  <g class="ic ic-grn" transform="translate(1355 355) scale(0.9167)" style="stroke-width:1.64"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/></g>
+  <text class="tt" x="1396" y="362">Admin</text>
+  <text class="tm" x="1396" y="378">dashboard.html</text>
+  <rect class="box-warn" x="1348" y="400" width="236" height="56" rx="9"/>
+  <text class="tt-s" x="1360" y="419">Refund ₹499 · SC-2027</text>
+  <text class="tm" x="1572" y="419" text-anchor="end">pending</text>
+  <rect class="btn-ok" x="1360" y="429" width="60" height="18" rx="5"/>
+  <text class="btn-t" x="1390" y="441.5" text-anchor="middle">Approve</text>
+  <rect class="btn-no" x="1426" y="429" width="52" height="18" rx="5"/>
+  <text class="btn-t2" x="1452" y="441.5" text-anchor="middle">Reject</text>
+  <text class="cap" x="1348" y="480">COST PER STEP · ₹</text>
+  <rect class="bar-hi" x="1354" y="504" width="20" height="40" rx="3"/>
+  <rect class="bar" x="1386" y="518" width="20" height="26" rx="3"/>
+  <rect class="bar" x="1418" y="532" width="20" height="12" rx="3"/>
+  <rect class="bar" x="1450" y="510" width="20" height="34" rx="3"/>
+  <rect class="bar" x="1482" y="526" width="20" height="18" rx="3"/>
+  <rect class="bar" x="1514" y="534" width="20" height="10" rx="3"/>
+  <rect class="bar" x="1546" y="536" width="20" height="8" rx="3"/>
+  <line class="hr" x1="1348" y1="544.5" x2="1584" y2="544.5"/>
+
+  <!-- the model, reached through one client -->
+  <path class="cloud" d="M712 118 A30 30 0 0 1 706 60 A40 40 0 0 1 776 40 A50 50 0 0 1 870 44 A36 36 0 0 1 916 80 A20 20 0 0 1 908 118 Z"/>
+  <g class="ic ic-vio" transform="translate(744 54) scale(1.083)" style="stroke-width:1.38"><path d="M12 3c.7 4.8 3.5 8 9 9-5.5 1-8.3 4.2-9 9-.7-4.8-3.5-8-9-9 5.5-1 8.3-4.2 9-9z"/></g>
+  <text class="tt" x="778" y="73" style="font-size:14px">Google Gemini</text>
+  <text class="tm" x="806" y="100" text-anchor="middle">flash-lite · flash · embedding</text>
+  <text class="lbl-dim" x="670" y="66" text-anchor="end">flash-lite first</text>
+  <text class="lbl-dim" x="670" y="80" text-anchor="end">flash if it fails</text>
+  <text class="lbl-dim" x="942" y="66">external API · HTTPS</text>
+  <text class="lbl-dim" x="942" y="80">15 requests / min, free tier</text>
+  <rect class="redact" x="678" y="138" width="260" height="36" rx="18"/>
+  <g class="ic ic-vio" transform="translate(694 148) scale(0.6667)" style="stroke-width:2.25"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></g>
+  <text class="tm-ink" x="718" y="160">PII redacted · one model client</text>
+  <rect class="box-sub" x="440" y="132" width="200" height="48" rx="10"/>
+  <g class="ic" transform="translate(454 146) scale(0.75)" style="stroke-width:2"><path d="M6.5 4h11"/><path d="M6.5 8.5h11"/><path d="M6.5 4H10a4.5 4.5 0 0 1 0 9H6.5l8 7.5"/></g>
+  <text class="tt" x="480" y="152">Every call metered</text>
+  <text class="tb" x="480" y="168">tokens and ₹, per step</text>
+  <path class="ln-dot" d="M678 156 H644" marker-end="url(#f0-dot)"/>
+  <rect class="box-sub" x="976" y="132" width="200" height="48" rx="10"/>
+  <g class="ic" transform="translate(990 146) scale(0.75)" style="stroke-width:2"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2"/><path d="M9.5 2.5h5"/></g>
+  <text class="tt" x="1016" y="152">Time-boxed</text>
+  <text class="tb" x="1016" y="168">20 s a request · 45 s a call</text>
+  <path class="ln-dot" d="M938 156 H976"/>
+  <path class="ln-vio" d="M794 210 V178" marker-end="url(#f0-vio)"/>
+  <path class="ln-vio" d="M794 137 V122" marker-end="url(#f0-vio)"/>
+  <path class="ln-vio" d="M822 120 V135" marker-end="url(#f0-vio)"/>
+  <path class="ln-vio" d="M822 176 V208" marker-end="url(#f0-vio)"/>
+  <text class="lbl-vio" x="786" y="198" text-anchor="end">redacted prompt</text>
+  <text class="lbl-vio" x="830" y="198">JSON answer</text>
+
+  <!-- on the bridge -->
+  <rect class="box" x="400" y="212" width="220" height="78" rx="12"/>
+  <rect class="bdg" x="414" y="228" width="30" height="30" rx="8.4"/><g class="ic" transform="translate(420 234) scale(0.75)" style="stroke-width:2"><rect x="3" y="3.5" width="18" height="7.5" rx="1.8"/><rect x="3" y="13" width="18" height="7.5" rx="1.8"/><path d="M7 7.25h.01M7 16.75h.01"/><path d="M11 7.25h6M11 16.75h6"/></g>
+  <text class="tt" x="454" y="238">Flask server</text>
+  <text class="tb" x="454" y="256">sign-in · roles · sessions</text>
+  <text class="tm" x="454" y="274">server.py · auth.py</text>
+  <rect class="box-acc" x="698" y="212" width="220" height="78" rx="12"/>
+  <rect class="bdg-acc" x="712" y="228" width="30" height="30" rx="8.4"/><g class="ic ic-acc" transform="translate(718 234) scale(0.75)" style="stroke-width:2"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx=".8"/><path d="M9.5 2.5v3.5M14.5 2.5v3.5M9.5 18v3.5M14.5 18v3.5M2.5 9.5h3.5M2.5 14.5h3.5M18 9.5h3.5M18 14.5h3.5"/></g>
+  <text class="tt-acc" x="752" y="238">AI worker × 4</text>
+  <text class="tb" x="752" y="256">analyse · look up · reply</text>
+  <text class="tm" x="752" y="274">off the request</text>
+  <rect class="box" x="996" y="212" width="220" height="78" rx="12"/>
+  <rect class="bdg" x="1010" y="228" width="30" height="30" rx="8.4"/><g class="ic" transform="translate(1016 234) scale(0.75)" style="stroke-width:2"><circle cx="6" cy="5" r="2.3"/><circle cx="6" cy="19" r="2.3"/><circle cx="18" cy="7" r="2.3"/><path d="M6 7.3v9.4"/><path d="M18 9.3c0 5-6.5 3.5-10.5 8"/></g>
+  <text class="tt" x="1050" y="238">Decision engine</text>
+  <text class="tb" x="1050" y="256">severity low → critical</text>
+  <text class="tm" x="1050" y="274">severity_of()</text>
+  <path class="ln-acc" d="M620 251 H696" marker-end="url(#f0-acc)"/>
+  <text class="lbl-acc" x="658" y="243" text-anchor="middle">hands off</text>
+  <path class="ln" d="M918 251 H994" marker-end="url(#f0-ink)"/>
+  <text class="lbl" x="956" y="243" text-anchor="middle">analysis</text>
+  <path class="ln" d="M1106 212 V199 H910 V210" marker-end="url(#f0-ink)"/>
+  <text class="lbl" x="1008" y="192" text-anchor="middle">low · medium → the assistant replies</text>
+  <path class="ln" d="M249 230 H398" marker-end="url(#f0-ink)"/>
+  <text class="lbl halo" x="324" y="223" text-anchor="middle">message · voice</text>
+  <text class="lbl-dim halo" x="324" y="245" text-anchor="middle">saved in ≈ 6 ms</text>
+  <path class="ln-ret" d="M398 262 H251" marker-end="url(#f0-ink)"/>
+  <text class="lbl halo" x="324" y="277" text-anchor="middle">reply, in their language</text>
+  <path class="ln" d="M1216 236 H1330" marker-end="url(#f0-ink)"/>
+  <text class="lbl-acc" x="1274" y="229" text-anchor="middle">high · critical</text>
+  <text class="lbl-dim" x="1274" y="250" text-anchor="middle">cancel · dispute</text>
+
+  <!-- what it stands on -->
+  <path class="cyl" d="M656 400 V462 A64 10 0 0 0 784 462 V400"/>
+  <ellipse class="cyl-top" cx="720" cy="400" rx="64" ry="10"/>
+  <text class="tt" x="720" y="433" text-anchor="middle">SQLite</text>
+  <text class="tm" x="720" y="449" text-anchor="middle">cases.db · 6 tables</text>
+  <path class="box" d="M846 392 H944 L964 412 V470 H836 V402 A10 10 0 0 1 846 392 Z"/>
+  <path class="ln" d="M944 392 V412 H964" style="stroke:var(--line-2)"/>
+  <text class="tm-ink" x="900" y="430" text-anchor="middle">orders.json</text>
+  <text class="tb" x="900" y="446" text-anchor="middle">back-office</text>
+  <text class="tb" x="900" y="460" text-anchor="middle">stand-in</text>
+  <path class="ln" d="M720 314 V386" marker-start="url(#f0-ink)" marker-end="url(#f0-ink)"/>
+  <text class="lbl halo" x="728" y="360">reads · writes</text>
+  <path class="ln" d="M900 314 V388" marker-end="url(#f0-ink)"/>
+  <text class="lbl halo" x="908" y="360">look-ups</text>
+  <path class="ln-grn" d="M1330 452 H966" marker-end="url(#f0-grn)"/>
+  <text class="lbl-grn halo" x="1046" y="444" text-anchor="middle">runs only after approval</text>
+
+  <!-- key -->
+  <path class="ln" d="M452 582 H484" marker-end="url(#f0-ink)"/>
+  <text class="lbl" x="492" y="586">request or reply</text>
+  <path class="ln-acc" d="M600 582 H632" marker-end="url(#f0-acc)"/>
+  <text class="lbl" x="640" y="586">background worker</text>
+  <path class="ln-vio" d="M760 582 H792" marker-end="url(#f0-vio)"/>
+  <text class="lbl" x="800" y="586">to and from Gemini</text>
+  <path class="ln-grn" d="M930 582 H962" marker-end="url(#f0-grn)"/>
+  <text class="lbl" x="970" y="586">runs only after approval</text>
+  <path class="ln-dot" d="M1122 582 H1154" marker-end="url(#f0-dot)"/>
+  <text class="lbl" x="1162" y="586">usage report</text>
+</svg>
+        </div>
+        <figcaption><strong>Setu carries a message from the person asking to whoever can answer it.</strong> A customer writes or speaks in their own language. The server saves the message at once, and a background worker asks Gemini to read it and draft an answer, with personal data masked first. The decision engine lets the assistant answer low and medium severity. High and critical cases, cancellations and billing disputes go to an agent's queue. A refund or other write that the model proposes waits for an admin, and only an approved action changes orders.json. The phone and console contents are sketches; the case numbers and amounts are examples.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ================================================================== -->
+  <!--  FIGURE 1 — container view                                           -->
+  <!-- ================================================================== -->
+  <section aria-labelledby="f1-title">
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="f1-title"><span class="fig">Fig. 1</span>Containers and the calls between them</h2>
+        <span class="drawno">container view · rev e48cfc6 · 27 Sep 2026</span>
+      </div>
+      <p class="hint">Scroll sideways to see the whole drawing.</p>
+      <figure>
+        <div class="scroll">
+<svg class="dg" viewBox="0 0 1740 1024" role="img" aria-label="Container view of Setu. Four browser workspaces call a Flask server across one HTTP boundary that checks the session and role on the way in and filters every reply on the way out. A customer message is saved in the request and answered by a background worker pool, which drives the decision engine and calls six AI functions. Each AI call passes PII redaction and a single model client that retries and times out before reaching Google Gemini, and reports its token usage to metering. Cases, users, actions and usage live in SQLite; orders live in orders.json, which only approved write actions change.">
+  <defs>
+    <marker id="f1-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-ink"/></marker>
+    <marker id="f1-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-acc"/></marker>
+    <marker id="f1-vio" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-vio"/></marker>
+    <marker id="f1-dot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-dot"/></marker>
+    <marker id="f1-grn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-grn"/></marker>
+  </defs>
+
+  <!-- ============ zones ============ -->
+  <rect class="z z-br" x="24" y="56" width="280" height="732" rx="14"/>
+  <rect class="bdg" x="40" y="73" width="28" height="28" rx="7.84"/><g class="ic" transform="translate(45.5 78.5) scale(0.7083)" style="stroke-width:2.12"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M2.5 9h19"/><path d="M6 6.5h.01M8.5 6.5h.01M11 6.5h.01"/></g>
+  <text class="zt" x="76" y="84">BROWSER</text>
+  <text class="zs" x="76" y="101">HTML · CSS · JS · no framework</text>
+
+  <rect class="z z-sv" x="400" y="56" width="660" height="732" rx="14"/>
+  <rect class="bdg-acc" x="416" y="73" width="28" height="28" rx="7.84"/><g class="ic ic-acc" transform="translate(421.5 78.5) scale(0.7083)" style="stroke-width:2.12"><rect x="3" y="3.5" width="18" height="7.5" rx="1.8"/><rect x="3" y="13" width="18" height="7.5" rx="1.8"/><path d="M7 7.25h.01M7 16.75h.01"/><path d="M11 7.25h6M11 16.75h6"/></g>
+  <text class="zt" x="452" y="84">FLASK SERVER · ONE PROCESS</text>
+  <text class="zs" x="452" y="101">server.py · pipeline.py · auth.py · actions.py · metering.py</text>
+
+  <rect class="z z-ai" x="1124" y="56" width="320" height="732" rx="14"/>
+  <rect class="bdg-vio" x="1140" y="73" width="28" height="28" rx="7.84"/><g class="ic ic-vio" transform="translate(1145.5 78.5) scale(0.7083)" style="stroke-width:2.12"><path d="M12 3c.7 4.8 3.5 8 9 9-5.5 1-8.3 4.2-9 9-.7-4.8-3.5-8-9-9 5.5-1 8.3-4.2 9-9z"/></g>
+  <text class="zt" x="1176" y="84">AI CORE</text>
+  <text class="zs" x="1176" y="101">coach_core.py · from the notebook</text>
+
+  <rect class="z z-gg" x="1508" y="56" width="208" height="732" rx="14"/>
+  <rect class="bdg-vio" x="1524" y="73" width="28" height="28" rx="7.84"/><g class="ic ic-vio" transform="translate(1529.5 78.5) scale(0.7083)" style="stroke-width:2.12"><path d="M7 19h10.5a4.5 4.5 0 0 0 .6-9A6.5 6.5 0 0 0 5.6 11.4 3.8 3.8 0 0 0 7 19z"/></g>
+  <text class="zt" x="1560" y="84">GOOGLE GEMINI</text>
+  <text class="zs" x="1560" y="101">external API · HTTPS</text>
+
+  <rect class="z z-op" x="24" y="836" width="280" height="164" rx="14"/>
+  <rect class="bdg" x="40" y="846" width="22" height="22" rx="6.16"/><g class="ic" transform="translate(44 850) scale(0.5833)" style="stroke-width:2.57"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9.5l3 2.5-3 2.5"/><path d="M12.5 15h4.5"/></g>
+  <text class="zt" x="70" y="862">OPERATIONS</text>
+
+  <rect class="z z-db" x="400" y="836" width="1044" height="164" rx="14"/>
+  <rect class="bdg-grn" x="416" y="846" width="22" height="22" rx="6.16"/><g class="ic ic-grn" transform="translate(420 850) scale(0.5833)" style="stroke-width:2.57"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+  <text class="zt" x="446" y="862">PERSISTENCE</text>
+
+  <rect class="z z-op" x="1508" y="836" width="208" height="164" rx="14"/>
+  <text class="zt" x="1524" y="862">LEGEND</text>
+
+  <!-- ============ usage reporting, drawn above the zones ============ -->
+  <path class="ln-dot" d="M1394 120 V36 H958 V118" marker-end="url(#f1-dot)"/>
+  <text class="lbl-dim" x="1176" y="28" text-anchor="middle">report_usage() · every call metered by step: analyse · lookup · embed · draft · score · translate · handoff</text>
+
+  <!-- ============ the HTTP boundary ============ -->
+  <rect class="boundary" x="416" y="120" width="36" height="644" rx="8"/>
+  <g class="ic ic-acc" transform="translate(426 127) scale(0.6667)" style="stroke-width:2.25"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></g>
+  <text class="bt-strong" transform="translate(429 442) rotate(-90)" text-anchor="middle" dominant-baseline="central">IN · session cookie · role check on every route</text>
+  <text class="bt" transform="translate(442 442) rotate(-90)" text-anchor="middle" dominant-baseline="central">OUT · allow-list serializer · soft errors with a reference</text>
+
+  <!-- ============ browser cards ============ -->
+  <rect class="box" x="40" y="120" width="248" height="68" rx="10"/>
+  <g class="ic" transform="translate(56 132) scale(0.625)" style="stroke-width:2.4"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3"/><path d="M16 7l3 3"/><path d="M13.5 9.5l2 2"/></g>
+  <text class="tt" x="77" y="144">Sign in</text>
+  <text class="tm" x="272" y="144" text-anchor="end">login.html</text>
+  <text class="tb" x="56" y="164">email or username · role cards</text>
+  <text class="tb" x="56" y="178">sign-up · one-click demo accounts</text>
+
+  <rect class="box" x="40" y="208" width="248" height="340" rx="10"/>
+  <g class="ic" transform="translate(56 220) scale(0.625)" style="stroke-width:2.4"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7"/></g>
+  <text class="tt" x="77" y="232">Customer portal</text>
+  <text class="tm" x="56" y="250">portal.html · portal-chat.html</text>
+  <text class="tm" x="56" y="264">profile.html</text>
+  <text class="tb" x="56" y="290">tickets · 14 issue tags · rating</text>
+  <text class="tb" x="56" y="306">chat with typing and audio</text>
+  <text class="tb" x="56" y="322">dictation that never auto-sends</text>
+  <text class="tb" x="56" y="338">language switched in place</text>
+  <text class="cap" x="56" y="360">SHARED MODULES</text>
+  <rect class="box-sub" x="56" y="368" width="102" height="48" rx="7"/>
+  <text class="tm-ink" x="107" y="388" text-anchor="middle">i18n.js</text>
+  <text class="tm" x="107" y="404" text-anchor="middle">129 strings</text>
+  <rect class="box-sub" x="170" y="368" width="102" height="48" rx="7"/>
+  <text class="tm-ink" x="221" y="388" text-anchor="middle">voice.js</text>
+  <text class="tm" x="221" y="404" text-anchor="middle">speech in · out</text>
+  <path class="ln" d="M107 416 V446" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M221 416 V446" marker-end="url(#f1-ink)"/>
+  <rect class="box-api" x="56" y="448" width="102" height="84" rx="7"/>
+  <text class="tm-ink" x="107" y="470" text-anchor="middle">localStorage</text>
+  <text class="tb" x="107" y="488" text-anchor="middle">catalogue cache</text>
+  <text class="tb" x="107" y="502" text-anchor="middle">voice on / off</text>
+  <text class="tm" x="107" y="522" text-anchor="middle">browser API</text>
+  <rect class="box-api" x="170" y="448" width="102" height="84" rx="7"/>
+  <text class="tm-ink" x="221" y="470" text-anchor="middle">Web Speech</text>
+  <text class="tb" x="221" y="488" text-anchor="middle">recognition</text>
+  <text class="tb" x="221" y="502" text-anchor="middle">synthesis</text>
+  <text class="tm" x="221" y="522" text-anchor="middle">browser API</text>
+
+  <rect class="box" x="40" y="568" width="248" height="80" rx="10"/>
+  <g class="ic" transform="translate(56 580) scale(0.625)" style="stroke-width:2.4"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="13" width="4" height="6" rx="1.5"/><rect x="17" y="13" width="4" height="6" rx="1.5"/><path d="M19 19v.5a2.5 2.5 0 0 1-2.5 2.5H13"/></g>
+  <text class="tt" x="77" y="592">Agent console</text>
+  <text class="tm" x="272" y="592" text-anchor="end">index.html</text>
+  <text class="tb" x="56" y="612">queue · live intelligence</text>
+  <text class="tb" x="56" y="628">English gloss · reply scoring</text>
+
+  <rect class="box" x="40" y="668" width="248" height="96" rx="10"/>
+  <g class="ic" transform="translate(56 680) scale(0.625)" style="stroke-width:2.4"><path d="M3 21h18"/><path d="M7 17v-5"/><path d="M12 17V7"/><path d="M17 17v-8"/></g>
+  <text class="tt" x="77" y="692">Admin dashboard</text>
+  <text class="tm" x="56" y="709">dashboard.html</text>
+  <text class="tb" x="56" y="726">8 sections · trends · exports</text>
+  <text class="tb" x="56" y="741">write-action approvals</text>
+  <text class="tb" x="56" y="756">cost per step and per case</text>
+
+  <!-- ============ browser to server, across the boundary ============ -->
+  <path class="ln" d="M288 154 H474" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="352" y="146" text-anchor="middle">sign in</text>
+  <path class="ln" d="M288 234 H474" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="352" y="226" text-anchor="middle">send · poll</text>
+  <path class="ln-ret" d="M476 262 H290" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="352" y="278" text-anchor="middle">ticket · reply</text>
+  <text class="lbl-dim" x="352" y="292" text-anchor="middle">every 0.9 → 4 s</text>
+  <path class="ln" d="M288 608 H474" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="352" y="600" text-anchor="middle">queue · cases</text>
+  <path class="ln" d="M288 716 H474" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="352" y="708" text-anchor="middle">approve · report</text>
+
+  <!-- ============ route groups ============ -->
+  <rect class="box" x="476" y="120" width="184" height="68" rx="10"/>
+  <g class="ic" transform="translate(492 132) scale(0.625)" style="stroke-width:2.4"><path d="M8.5 7l-5 5 5 5"/><path d="M15.5 7l5 5-5 5"/></g>
+  <text class="tt" x="513" y="144">Auth API</text>
+  <text class="tm" x="492" y="164">/api/login · /register</text>
+  <text class="tm" x="492" y="178">/logout · /me</text>
+
+  <rect class="box" x="476" y="208" width="184" height="340" rx="10"/>
+  <g class="ic" transform="translate(492 220) scale(0.625)" style="stroke-width:2.4"><path d="M8.5 7l-5 5 5 5"/><path d="M15.5 7l5 5-5 5"/></g>
+  <text class="tt" x="513" y="232">Portal API</text>
+  <text class="tm" x="644" y="232" text-anchor="end">customer</text>
+  <text class="tm" x="492" y="250">/api/portal/*</text>
+  <text class="tm" x="492" y="282">POST  /tickets</text>
+  <text class="tm" x="492" y="298">GET   /cases/:id</text>
+  <text class="tm" x="492" y="314">POST  /cases/:id/message</text>
+  <text class="tm" x="492" y="330">POST  /cases/:id/rating</text>
+  <text class="tm" x="492" y="346">GET   /faqs</text>
+  <text class="tm" x="492" y="362">GET   /languages</text>
+  <text class="tm" x="492" y="378">POST  /language</text>
+  <text class="tm" x="492" y="394">GET·POST /profile</text>
+  <text class="tm" x="492" y="410">POST  /password</text>
+  <rect class="pill-lock" x="492" y="480" width="152" height="52" rx="7"/>
+  <text class="tm-ink" x="502" y="500">as_customer_case()</text>
+  <text class="tb" x="502" y="518">allow-list: no analysis</text>
+
+  <rect class="box" x="476" y="568" width="184" height="80" rx="10"/>
+  <g class="ic" transform="translate(492 580) scale(0.625)" style="stroke-width:2.4"><path d="M8.5 7l-5 5 5 5"/><path d="M15.5 7l5 5-5 5"/></g>
+  <text class="tt" x="513" y="592">Console API</text>
+  <text class="tm" x="644" y="592" text-anchor="end">agent +</text>
+  <text class="tm" x="492" y="612">/api/queue · /open-case</text>
+  <text class="tm" x="492" y="628">/api/agent · /gloss</text>
+
+  <rect class="box" x="476" y="668" width="184" height="96" rx="10"/>
+  <g class="ic" transform="translate(492 680) scale(0.625)" style="stroke-width:2.4"><path d="M8.5 7l-5 5 5 5"/><path d="M15.5 7l5 5-5 5"/></g>
+  <text class="tt" x="513" y="692">Admin API</text>
+  <text class="tm" x="644" y="692" text-anchor="end">admin</text>
+  <text class="tm" x="492" y="712">/api/stats · /usage</text>
+  <text class="tm" x="492" y="728">/api/actions/:id/decide</text>
+  <text class="tm" x="492" y="744">/api/cases.csv · export</text>
+
+  <!-- ============ services ============ -->
+  <rect class="box" x="690" y="120" width="172" height="68" rx="10"/>
+  <g class="ic" transform="translate(706 132) scale(0.625)" style="stroke-width:2.4"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></g>
+  <text class="tt" x="727" y="144">Accounts</text>
+  <text class="tm" x="846" y="144" text-anchor="end">auth.py</text>
+  <text class="tb" x="706" y="164">scrypt · 5 tries → 15 min</text>
+  <text class="tb" x="706" y="178">12 h session · 3 roles</text>
+
+  <rect class="box" x="872" y="120" width="172" height="68" rx="10"/>
+  <g class="ic" transform="translate(888 132) scale(0.625)" style="stroke-width:2.4"><path d="M6.5 4h11"/><path d="M6.5 8.5h11"/><path d="M6.5 4H10a4.5 4.5 0 0 1 0 9H6.5l8 7.5"/></g>
+  <text class="tt" x="909" y="144">Metering</text>
+  <text class="tb" x="888" y="164">tokens + ₹ per step</text>
+  <text class="tb" x="888" y="178">per-user limits</text>
+
+  <rect class="box" x="690" y="208" width="354" height="52" rx="10"/>
+  <g class="ic" transform="translate(706 217) scale(0.625)" style="stroke-width:2.4"><path d="M3 13l2.6-7.5h12.8L21 13v5.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></g>
+  <text class="tt" x="727" y="229">Customer pipeline</text>
+  <text class="tm" x="1028" y="229" text-anchor="end">pipeline.py</text>
+  <text class="tb" x="706" y="248">record_customer_message() · no model · ≈ 6 ms</text>
+
+  <rect class="box-acc" x="690" y="280" width="354" height="52" rx="10"/>
+  <g class="ic ic-acc" transform="translate(706 289) scale(0.625)" style="stroke-width:2.4"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx=".8"/><path d="M9.5 2.5v3.5M14.5 2.5v3.5M9.5 18v3.5M14.5 18v3.5M2.5 9.5h3.5M2.5 14.5h3.5M18 9.5h3.5M18 14.5h3.5"/></g>
+  <text class="tt-acc" x="727" y="301">AI worker pool</text>
+  <text class="tm" x="1028" y="301" text-anchor="end">ThreadPoolExecutor × 4</text>
+  <text class="tb" x="706" y="320">respond_to_customer() · per-case lock · merge on commit</text>
+
+  <rect class="box" x="690" y="352" width="354" height="52" rx="10"/>
+  <g class="ic" transform="translate(706 361) scale(0.625)" style="stroke-width:2.4"><circle cx="6" cy="5" r="2.3"/><circle cx="6" cy="19" r="2.3"/><circle cx="18" cy="7" r="2.3"/><path d="M6 7.3v9.4"/><path d="M18 9.3c0 5-6.5 3.5-10.5 8"/></g>
+  <text class="tt" x="727" y="373">Decision engine</text>
+  <text class="tm" x="1028" y="373" text-anchor="end">severity_of()</text>
+  <text class="tb" x="706" y="392">low · medium · high · critical → assistant or a person</text>
+
+  <rect class="box" x="690" y="424" width="354" height="52" rx="10"/>
+  <g class="ic" transform="translate(706 433) scale(0.625)" style="stroke-width:2.4"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></g>
+  <text class="tt" x="727" y="445">Languages</text>
+  <text class="tm" x="1028" y="445" text-anchor="end">languages.py</text>
+  <text class="tb" x="706" y="464">each message · 10 languages + Hinglish · hi / mr by words</text>
+
+  <rect class="box" x="690" y="496" width="354" height="52" rx="10"/>
+  <g class="ic" transform="translate(706 505) scale(0.625)" style="stroke-width:2.4"><path d="M5 7V5h14v2"/><path d="M12 5v14"/><path d="M9 19h6"/></g>
+  <text class="tt" x="727" y="517">UI catalogue</text>
+  <text class="tm" x="1028" y="517" text-anchor="end">ui_strings()</text>
+  <text class="tb" x="706" y="536">Hindi written by hand · others translated once, cached</text>
+
+  <rect class="box" x="690" y="568" width="354" height="80" rx="10"/>
+  <g class="ic" transform="translate(706 580) scale(0.625)" style="stroke-width:2.4"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></g>
+  <text class="tt" x="727" y="592">Queue &amp; case view</text>
+  <text class="tm" x="1028" y="592" text-anchor="end">work_queue()</text>
+  <text class="tb" x="706" y="612">severity first, then the longest wait</text>
+  <text class="tb" x="706" y="628">analyse on open · score the draft</text>
+
+  <rect class="box-grn" x="690" y="668" width="354" height="96" rx="10"/>
+  <g class="ic ic-grn" transform="translate(706 680) scale(0.625)" style="stroke-width:2.4"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/></g>
+  <text class="tt-grn" x="727" y="692">Write-action gate</text>
+  <text class="tm" x="1028" y="692" text-anchor="end">actions.py</text>
+  <text class="tb" x="706" y="712">model proposes → pending → an admin decides</text>
+  <text class="tb" x="706" y="728">expedite · refund · account reset</text>
+  <text class="tb-strong" x="706" y="748">never runs on its own</text>
+
+  <!-- route → service -->
+  <path class="ln" d="M660 154 H688" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M660 234 H688" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M660 522 H688" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M660 608 H688" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M660 716 H688" marker-end="url(#f1-ink)"/>
+
+  <!-- the chain down the pipeline -->
+  <path class="ln-acc" d="M730 260 V278" marker-end="url(#f1-acc)"/>
+  <text class="lbl-acc" x="742" y="274">submit · the request returns here</text>
+  <path class="ln" d="M730 332 V350" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="742" y="346">decide who answers</text>
+  <path class="ln" d="M730 404 V422" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="742" y="418">pick the reply language</text>
+
+  <!-- ============ worker → AI core ============ -->
+  <path class="ln-acc" d="M1044 306 H1130" marker-end="url(#f1-acc)"/>
+  <path class="ln-acc" d="M1132 234 V450"/>
+  <path class="ln-acc" d="M1132 234 H1139"/>
+  <path class="ln-acc" d="M1132 378 H1139"/>
+  <path class="ln-acc" d="M1132 450 H1139"/>
+  <circle class="node" cx="1140" cy="234" r="2.6"/>
+  <circle class="node" cx="1140" cy="306" r="2.6"/>
+  <circle class="node" cx="1140" cy="378" r="2.6"/>
+  <circle class="node" cx="1140" cy="450" r="2.6"/>
+  <text class="lbl-acc" x="1088" y="296" text-anchor="middle">3–5 calls</text>
+  <text class="lbl-acc" x="1088" y="324" text-anchor="middle">per turn</text>
+
+  <path class="ln" d="M1044 522 H1138" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="1088" y="514" text-anchor="middle">once per</text>
+  <text class="lbl" x="1088" y="540" text-anchor="middle">language</text>
+  <path class="ln" d="M1044 608 H1138" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="1088" y="600" text-anchor="middle">score</text>
+  <text class="lbl" x="1088" y="626" text-anchor="middle">the draft</text>
+
+  <!-- ============ AI core ============ -->
+  <rect class="redact" x="1326" y="120" width="24" height="644" rx="6"/>
+  <rect class="model" x="1360" y="120" width="68" height="644" rx="8"/>
+  <g class="ic ic-vio" transform="translate(1331 129) scale(0.5833)" style="stroke-width:2.57"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></g>
+  <g class="ic ic-vio" transform="translate(1385 128) scale(0.75)" style="stroke-width:2"><path d="M12 3c.7 4.8 3.5 8 9 9-5.5 1-8.3 4.2-9 9-.7-4.8-3.5-8-9-9 5.5-1 8.3-4.2 9-9z"/></g>
+
+  <!-- every function leaves through redaction, then the one model client -->
+  <path class="ln" d="M1316 234 H1326 M1350 234 H1358" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M1316 306 H1326 M1350 306 H1358" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M1316 378 H1326 M1350 378 H1358" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M1316 450 H1326 M1350 450 H1358" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M1316 522 H1326 M1350 522 H1358" marker-end="url(#f1-ink)"/>
+  <path class="ln" d="M1316 608 H1326 M1350 608 H1358" marker-end="url(#f1-ink)"/>
+
+  <text class="bt-strong" transform="translate(1338 442) rotate(-90)" text-anchor="middle" dominant-baseline="central">PII REDACTION · email · card · order id · phone</text>
+  <text class="bt-strong" transform="translate(1379 442) rotate(-90)" text-anchor="middle" dominant-baseline="central">ONE MODEL CLIENT · _call_model()</text>
+  <text class="bt" transform="translate(1394 442) rotate(-90)" text-anchor="middle" dominant-baseline="central">retry 1 · 2 · 4 s · flash-lite, then flash</text>
+  <text class="bt" transform="translate(1409 442) rotate(-90)" text-anchor="middle" dominant-baseline="central">20 s per request · 45 s per call</text>
+
+  <rect class="box-vio" x="1140" y="208" width="176" height="52" rx="9"/>
+  <g class="ic ic-vio" transform="translate(1154 214) scale(0.625)" style="stroke-width:2.4"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.5-4.5"/></g>
+  <text class="tt" x="1175" y="226">Analyse</text>
+  <text class="tm" x="1154" y="240">analyze_customer_message()</text>
+  <text class="tb" x="1154" y="253">risk · intent · emotion</text>
+
+  <rect class="box-vio" x="1140" y="280" width="176" height="52" rx="9"/>
+  <g class="ic ic-vio" transform="translate(1154 286) scale(0.625)" style="stroke-width:2.4"><path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5L12 12l9-4.5"/><path d="M12 12v9"/></g>
+  <text class="tt" x="1175" y="298">Look up</text>
+  <text class="tm" x="1154" y="312">gather_facts() · tools</text>
+  <text class="tb" x="1154" y="325">2 read · 3 write (proposed)</text>
+
+  <rect class="box-vio" x="1140" y="352" width="176" height="52" rx="9"/>
+  <g class="ic ic-vio" transform="translate(1154 358) scale(0.625)" style="stroke-width:2.4"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></g>
+  <text class="tt" x="1175" y="370">Reply or handoff</text>
+  <text class="tm" x="1154" y="384">suggest_reply()</text>
+  <text class="tm" x="1154" y="397">handoff_message()</text>
+
+  <rect class="box-vio" x="1140" y="424" width="176" height="52" rx="9"/>
+  <g class="ic ic-vio" transform="translate(1154 430) scale(0.625)" style="stroke-width:2.4"><path d="M2.5 5H8a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2.5z"/><path d="M21.5 5H16a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h6.5z"/></g>
+  <text class="tt" x="1175" y="442">Knowledge base</text>
+  <text class="tm" x="1154" y="456">find_kb_article()</text>
+  <text class="tb" x="1154" y="469">5 articles · answers at ≥ 0.65</text>
+
+  <rect class="box-vio" x="1140" y="496" width="176" height="52" rx="9"/>
+  <g class="ic ic-vio" transform="translate(1154 502) scale(0.625)" style="stroke-width:2.4"><path d="M3 5h9M7.5 3v2"/><path d="M5 5c.6 3.2 2.7 5.8 5.5 7.3"/><path d="M10 5c-.7 3.4-2.9 6-6.2 7.6"/><path d="M13 21l4-10 4 10"/><path d="M14.4 17.5h5.2"/></g>
+  <text class="tt" x="1175" y="514">Translate</text>
+  <text class="tm" x="1154" y="528">translate_for_agent()</text>
+  <text class="tm" x="1154" y="541">translate_lines()</text>
+
+  <rect class="box-vio" x="1140" y="568" width="176" height="80" rx="9"/>
+  <g class="ic ic-vio" transform="translate(1154 578) scale(0.625)" style="stroke-width:2.4"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></g>
+  <text class="tt" x="1175" y="590">Score agent reply</text>
+  <text class="tm" x="1154" y="608">evaluate_agent_response()</text>
+  <text class="tb" x="1154" y="624">tone · empathy · clarity</text>
+  <text class="tb" x="1154" y="638">1 – 10 each, with a tip</text>
+
+  <rect class="box-note" x="1140" y="668" width="176" height="76" rx="9"/>
+  <g class="ic ic-vio" transform="translate(1154 678) scale(0.625)" style="stroke-width:2.4"><path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/></g>
+  <text class="tt" x="1175" y="690">Structured output</text>
+  <text class="tb" x="1154" y="708">every answer fits a JSON schema:</text>
+  <text class="tb" x="1154" y="722">analysis · reply · scorecard</text>
+  <text class="tm" x="1154" y="736">no free-text parsing</text>
+
+  <!-- ============ model client → Gemini ============ -->
+  <path class="ln-vio" d="M1428 234 H1522" marker-end="url(#f1-vio)"/>
+  <text class="lbl-vio" x="1476" y="226" text-anchor="middle">primary</text>
+  <path class="ln-vio" d="M1428 306 H1522" marker-end="url(#f1-vio)"/>
+  <text class="lbl-vio" x="1476" y="298" text-anchor="middle">fallback</text>
+  <path class="ln-vio" d="M1428 450 H1522" marker-end="url(#f1-vio)"/>
+  <text class="lbl-vio" x="1476" y="442" text-anchor="middle">embed</text>
+
+  <rect class="box-vio" x="1524" y="208" width="176" height="52" rx="9"/>
+  <text class="tm-big" x="1538" y="229">gemini-3.5-flash-lite</text>
+  <text class="tb" x="1538" y="248">primary · ~1 s measured</text>
+  <rect class="box-vio" x="1524" y="280" width="176" height="52" rx="9"/>
+  <text class="tm-big" x="1538" y="301">gemini-3.5-flash</text>
+  <text class="tb" x="1538" y="320">fallback · ~10 s measured</text>
+  <rect class="box-vio" x="1524" y="424" width="176" height="52" rx="9"/>
+  <text class="tm-big" x="1538" y="445">gemini-embedding-001</text>
+  <text class="tb" x="1538" y="464">knowledge-base search</text>
+
+  <rect class="box-warn" x="1524" y="568" width="176" height="80" rx="9"/>
+  <g class="ic ic-warn" transform="translate(1538 580) scale(0.625)" style="stroke-width:2.4"><path d="M12 3.5L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17h.01"/></g>
+  <text class="tt-warn" x="1559" y="592">Free-tier limit</text>
+  <text class="tm-ink" x="1538" y="612">15 requests / min</text>
+  <text class="tb" x="1538" y="628">per model, per project</text>
+  <text class="tb" x="1538" y="642">≈ 3 customer messages / min</text>
+
+  <!-- ============ persistence ============ -->
+  <path class="ln" d="M580 788 V874" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="590" y="834">reads · writes</text>
+
+  <path class="ln-grn" d="M1010 764 V812 H1200 V874" marker-end="url(#f1-grn)"/>
+  <text class="lbl-grn" x="1105" y="806" text-anchor="middle">runs only after approval</text>
+
+  <path class="ln" d="M1300 788 V874" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="1308" y="834">tool look-ups</text>
+
+  <rect class="box" x="416" y="876" width="628" height="108" rx="10"/>
+  <g class="ic ic-grn" transform="translate(432 888) scale(0.625)" style="stroke-width:2.4"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+  <text class="tt" x="453" y="900">SQLite</text>
+  <text class="tm" x="502" y="900">app/cases.db</text>
+  <text class="tb" x="432" y="918">one row per case with a JSON body · columns added by migration on start</text>
+  <rect class="chip" x="432" y="930" width="50" height="22" rx="6"/>
+  <text class="tm-ink" x="457" y="945" text-anchor="middle">cases</text>
+  <rect class="chip" x="490" y="930" width="50" height="22" rx="6"/>
+  <text class="tm-ink" x="515" y="945" text-anchor="middle">users</text>
+  <rect class="chip" x="548" y="930" width="62" height="22" rx="6"/>
+  <text class="tm-ink" x="579" y="945" text-anchor="middle">actions</text>
+  <rect class="chip" x="618" y="930" width="50" height="22" rx="6"/>
+  <text class="tm-ink" x="643" y="945" text-anchor="middle">usage</text>
+  <rect class="chip" x="676" y="930" width="82" height="22" rx="6"/>
+  <text class="tm-ink" x="717" y="945" text-anchor="middle">faq_misses</text>
+  <rect class="chip" x="766" y="930" width="68" height="22" rx="6"/>
+  <text class="tm-ink" x="800" y="945" text-anchor="middle">settings</text>
+  <text class="tb" x="432" y="972">writes go through persist() under a store lock; the worker also holds a per-case lock</text>
+
+  <rect class="box" x="1140" y="876" width="288" height="108" rx="10"/>
+  <g class="ic" transform="translate(1156 888) scale(0.625)" style="stroke-width:2.4"><path d="M6.5 2.5H14l5 5v12.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V4a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M14 2.5v5h5"/></g>
+  <text class="tm-big" x="1177" y="900">orders.json</text>
+  <text class="tb" x="1156" y="918">back-office stand-in</text>
+  <text class="tb" x="1156" y="934">orders · refunds · account</text>
+  <text class="tb" x="1156" y="952">read by the look-up tools</text>
+  <text class="tb-strong" x="1156" y="970">changed only by approved actions</text>
+
+  <!-- ============ operations ============ -->
+  <text class="tt" x="40" y="888">Logs</text>
+  <text class="tb" x="82" y="888">"setu" logger → console</text>
+  <text class="tm" x="40" y="904">request refs · step timings · handovers</text>
+  <text class="tt" x="40" y="930">Config</text>
+  <text class="tm" x="90" y="930">GEMINI_API_KEY · file or env</text>
+  <text class="tm" x="40" y="946">GEMINI_MODEL · DEMO_PASSWORD</text>
+  <text class="tt" x="40" y="972">Tests</text>
+  <text class="tb" x="84" y="972">521 · the network is blocked</text>
+  <text class="tm" x="40" y="988">ruff clean</text>
+
+  <!-- ============ legend ============ -->
+  <path class="ln" d="M1524 886 H1560" marker-end="url(#f1-ink)"/>
+  <text class="lbl" x="1572" y="890">request or call</text>
+  <path class="ln-acc" d="M1524 908 H1560" marker-end="url(#f1-acc)"/>
+  <text class="lbl" x="1572" y="912">background worker</text>
+  <path class="ln-vio" d="M1524 930 H1560" marker-end="url(#f1-vio)"/>
+  <text class="lbl" x="1572" y="934">network to Gemini</text>
+  <path class="ln-dot" d="M1524 952 H1560" marker-end="url(#f1-dot)"/>
+  <text class="lbl" x="1572" y="956">usage report</text>
+  <rect class="boundary" x="1524" y="966" width="36" height="12" rx="3"/>
+  <text class="lbl" x="1572" y="976">boundary every call crosses</text>
+</svg>
+        </div>
+        <figcaption><strong>Every request crosses one boundary, and every model call crosses one client.</strong> Browsers reach the server only through the HTTP boundary, which checks the session and role on the way in and passes customer replies through an allow-list on the way out. A customer's message is saved in the request, and the reply comes from the AI worker pool. The worker drives the decision engine and the AI core. Each AI function reaches Gemini only after its text is redacted and handed to the model client, which retries and stops at 45 seconds.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ================================================================== -->
+  <!--  FIGURE 2 — one message, end to end                                  -->
+  <!-- ================================================================== -->
+  <section aria-labelledby="f2-title">
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="f2-title"><span class="fig">Fig. 2</span>One customer message, end to end</h2>
+        <span class="drawno">sequence · measured on this build</span>
+      </div>
+      <p class="hint">Scroll sideways to see the whole drawing.</p>
+      <figure>
+        <div class="scroll">
+<svg class="dg" viewBox="0 0 1240 730" role="img" aria-label="Sequence of one customer message. The browser posts the ticket; Flask saves it to SQLite and answers in about 6 milliseconds while the chat shows typing. Flask submits the case to an AI worker, which checks for a knowledge gap, analyses the message, looks up orders, decides who answers, writes the reply or handoff in the customer's language through the AI core and Gemini, then commits under the case lock about 7 seconds later. The browser polls, the reply appears and can be played aloud; if the case was handed over it joins the agent's queue.">
+  <defs>
+    <marker id="f2-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-ink"/></marker>
+    <marker id="f2-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-acc"/></marker>
+    <marker id="f2-vio" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-vio"/></marker>
+    <marker id="f2-dot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-dot"/></marker>
+  </defs>
+  <!-- who takes part -->
+  <line class="ln-life" x1="100" y1="38" x2="100" y2="56"/>
+  <rect class="bdg" x="85" y="8" width="30" height="30" rx="8.4"/><g class="ic" transform="translate(91 14) scale(0.75)" style="stroke-width:2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7"/></g>
+  <line class="ln-life" x1="280" y1="38" x2="280" y2="56"/>
+  <rect class="bdg" x="265" y="8" width="30" height="30" rx="8.4"/><g class="ic" transform="translate(271 14) scale(0.75)" style="stroke-width:2"><rect x="3" y="3.5" width="18" height="7.5" rx="1.8"/><rect x="3" y="13" width="18" height="7.5" rx="1.8"/><path d="M7 7.25h.01M7 16.75h.01"/><path d="M11 7.25h6M11 16.75h6"/></g>
+  <line class="ln-life" x1="460" y1="38" x2="460" y2="56"/>
+  <rect class="bdg-grn" x="445" y="8" width="30" height="30" rx="8.4"/><g class="ic ic-grn" transform="translate(451 14) scale(0.75)" style="stroke-width:2"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></g>
+  <line class="ln-life" x1="640" y1="38" x2="640" y2="56"/>
+  <rect class="bdg-acc" x="625" y="8" width="30" height="30" rx="8.4"/><g class="ic ic-acc" transform="translate(631 14) scale(0.75)" style="stroke-width:2"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx=".8"/><path d="M9.5 2.5v3.5M14.5 2.5v3.5M9.5 18v3.5M14.5 18v3.5M2.5 9.5h3.5M2.5 14.5h3.5M18 9.5h3.5M18 14.5h3.5"/></g>
+  <line class="ln-life" x1="820" y1="38" x2="820" y2="56"/>
+  <rect class="bdg-vio" x="805" y="8" width="30" height="30" rx="8.4"/><g class="ic ic-vio" transform="translate(811 14) scale(0.75)" style="stroke-width:2"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></g>
+  <line class="ln-life" x1="1000" y1="38" x2="1000" y2="56"/>
+  <rect class="bdg-vio" x="985" y="8" width="30" height="30" rx="8.4"/><g class="ic ic-vio" transform="translate(991 14) scale(0.75)" style="stroke-width:2"><path d="M12 3c.7 4.8 3.5 8 9 9-5.5 1-8.3 4.2-9 9-.7-4.8-3.5-8-9-9 5.5-1 8.3-4.2 9-9z"/></g>
+  <line class="ln-life" x1="1160" y1="38" x2="1160" y2="56"/>
+  <rect class="bdg" x="1145" y="8" width="30" height="30" rx="8.4"/><g class="ic" transform="translate(1151 14) scale(0.75)" style="stroke-width:2"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="13" width="4" height="6" rx="1.5"/><rect x="17" y="13" width="4" height="6" rx="1.5"/><path d="M19 19v.5a2.5 2.5 0 0 1-2.5 2.5H13"/></g>
+  <g transform="translate(0 40)">
+
+  <!-- lifelines -->
+  <line class="ln-life" x1="100" y1="60" x2="100" y2="670"/>
+  <line class="ln-life" x1="280" y1="60" x2="280" y2="670"/>
+  <line class="ln-life" x1="460" y1="60" x2="460" y2="670"/>
+  <line class="ln-life" x1="640" y1="60" x2="640" y2="670"/>
+  <line class="ln-life" x1="820" y1="60" x2="820" y2="670"/>
+  <line class="ln-life" x1="1000" y1="60" x2="1000" y2="670"/>
+  <line class="ln-life" x1="1160" y1="60" x2="1160" y2="670"/>
+
+  <!-- the worker is busy from submit to commit -->
+  <rect class="act-bar" x="634" y="228" width="12" height="274" rx="3"/>
+
+  <!-- headers -->
+  <rect class="head" x="26" y="16" width="148" height="44" rx="9"/>
+  <text class="tt" x="100" y="36" text-anchor="middle">Customer</text>
+  <text class="tm" x="100" y="52" text-anchor="middle">portal-chat.html</text>
+  <rect class="head" x="206" y="16" width="148" height="44" rx="9"/>
+  <text class="tt" x="280" y="36" text-anchor="middle">Flask request</text>
+  <text class="tm" x="280" y="52" text-anchor="middle">Portal API</text>
+  <rect class="head" x="386" y="16" width="148" height="44" rx="9"/>
+  <text class="tt" x="460" y="36" text-anchor="middle">SQLite</text>
+  <text class="tm" x="460" y="52" text-anchor="middle">cases.db</text>
+  <rect class="head-acc" x="566" y="16" width="148" height="44" rx="9"/>
+  <text class="tt-acc" x="640" y="36" text-anchor="middle">AI worker</text>
+  <text class="tm" x="640" y="52" text-anchor="middle">AI_POOL thread</text>
+  <rect class="head" x="746" y="16" width="148" height="44" rx="9"/>
+  <text class="tt" x="820" y="36" text-anchor="middle">AI core</text>
+  <text class="tm" x="820" y="52" text-anchor="middle">redact · model client</text>
+  <rect class="head-vio" x="926" y="16" width="148" height="44" rx="9"/>
+  <text class="tt" x="1000" y="36" text-anchor="middle">Gemini</text>
+  <text class="tm" x="1000" y="52" text-anchor="middle">external</text>
+  <rect class="head" x="1090" y="16" width="140" height="44" rx="9"/>
+  <text class="tt" x="1160" y="36" text-anchor="middle">Agent console</text>
+  <text class="tm" x="1160" y="52" text-anchor="middle">index.html</text>
+
+  <!-- 1 -->
+  <path class="ln" d="M100 100 H278" marker-end="url(#f2-ink)"/>
+  <circle class="badge" cx="122" cy="89" r="9"/><text class="badge-t" x="122" y="92.5" text-anchor="middle">1</text>
+  <text class="lbl" x="138" y="93">POST /api/portal/tickets</text>
+  <!-- 2 -->
+  <path class="ln" d="M280 144 H458" marker-end="url(#f2-ink)"/>
+  <circle class="badge" cx="302" cy="133" r="9"/><text class="badge-t" x="302" y="136.5" text-anchor="middle">2</text>
+  <text class="lbl" x="318" y="137">save message · ai_pending</text>
+  <!-- 3 -->
+  <path class="ln-ret" d="M280 188 H102" marker-end="url(#f2-ink)"/>
+  <circle class="badge" cx="122" cy="177" r="9"/><text class="badge-t" x="122" y="180.5" text-anchor="middle">3</text>
+  <text class="lbl" x="138" y="181">200 · chat shows “typing”</text>
+  <rect class="tag" x="290" y="176" width="58" height="20" rx="5"/>
+  <text class="lbl-dim" x="319" y="190" text-anchor="middle">≈ 6 ms</text>
+  <!-- 4 -->
+  <path class="ln-acc" d="M280 232 H632" marker-end="url(#f2-acc)"/>
+  <circle class="badge" cx="302" cy="221" r="9"/><text class="badge-t" x="302" y="224.5" text-anchor="middle">4</text>
+  <text class="lbl-acc" x="318" y="225">submit(case) to the worker pool</text>
+  <!-- 5 -->
+  <path class="ln" d="M646 276 H818" marker-end="url(#f2-ink)"/>
+  <path class="ln-vio" d="M820 276 H998" marker-end="url(#f2-vio)"/>
+  <circle class="badge" cx="668" cy="265" r="9"/><text class="badge-t" x="668" y="268.5" text-anchor="middle">5</text>
+  <text class="lbl" x="684" y="269">knowledge-gap check</text>
+  <text class="lbl-vio" x="836" y="269">embed</text>
+  <!-- 6 -->
+  <path class="ln" d="M646 320 H818" marker-end="url(#f2-ink)"/>
+  <path class="ln-vio" d="M820 320 H998" marker-end="url(#f2-vio)"/>
+  <circle class="badge" cx="668" cy="309" r="9"/><text class="badge-t" x="668" y="312.5" text-anchor="middle">6</text>
+  <text class="lbl" x="684" y="313">analyse → severity</text>
+  <text class="lbl-vio" x="836" y="313">JSON schema</text>
+  <!-- 7 -->
+  <path class="ln" d="M646 364 H818" marker-end="url(#f2-ink)"/>
+  <path class="ln-vio" d="M820 364 H998" marker-end="url(#f2-vio)"/>
+  <circle class="badge" cx="668" cy="353" r="9"/><text class="badge-t" x="668" y="356.5" text-anchor="middle">7</text>
+  <text class="lbl" x="684" y="357">look up orders, read-only</text>
+  <text class="lbl-vio" x="836" y="357">tool calling</text>
+  <!-- 8 -->
+  <path class="ln" d="M646 398 H700 V420 H648" marker-end="url(#f2-ink)"/>
+  <circle class="badge" cx="718" cy="409" r="9"/><text class="badge-t" x="718" y="412.5" text-anchor="middle">8</text>
+  <text class="lbl" x="734" y="413">decide: assistant, a person, or a help article (Fig. 3)</text>
+  <!-- 9 -->
+  <path class="ln" d="M646 452 H818" marker-end="url(#f2-ink)"/>
+  <path class="ln-vio" d="M820 452 H998" marker-end="url(#f2-vio)"/>
+  <circle class="badge" cx="668" cy="441" r="9"/><text class="badge-t" x="668" y="444.5" text-anchor="middle">9</text>
+  <text class="lbl" x="684" y="445">reply or handoff note</text>
+  <text class="lbl-vio" x="836" y="445">in the customer's language</text>
+  <!-- 10 -->
+  <path class="ln-acc" d="M634 496 H462" marker-end="url(#f2-acc)"/>
+  <circle class="badge" cx="482" cy="485" r="9"/><text class="badge-t" x="482" y="488.5" text-anchor="middle">10</text>
+  <text class="lbl-acc" x="498" y="489">commit under the case lock</text>
+  <rect class="tag" x="480" y="504" width="148" height="20" rx="5"/>
+  <text class="lbl-dim" x="554" y="518" text-anchor="middle">≈ 7 s · off the request</text>
+  <!-- 11 -->
+  <path class="ln" d="M100 560 H278" marker-end="url(#f2-ink)"/>
+  <circle class="badge" cx="122" cy="549" r="9"/><text class="badge-t" x="122" y="552.5" text-anchor="middle">11</text>
+  <text class="lbl" x="138" y="553">poll GET /cases/:id</text>
+  <!-- 12 -->
+  <path class="ln-ret" d="M280 604 H102" marker-end="url(#f2-ink)"/>
+  <circle class="badge" cx="122" cy="593" r="9"/><text class="badge-t" x="122" y="596.5" text-anchor="middle">12</text>
+  <text class="lbl" x="138" y="597">reply appears · Play reads it aloud</text>
+  <!-- 13 -->
+  <path class="ln-dot" d="M460 648 H1158" marker-end="url(#f2-dot)"/>
+  <circle class="badge" cx="482" cy="637" r="9"/><text class="badge-t" x="482" y="640.5" text-anchor="middle">13</text>
+  <text class="lbl" x="498" y="641">if a person must answer: the case joins the queue, most severe first</text>
+  </g>
+</svg>
+        </div>
+        <figcaption><strong>The customer waits for one database write; the model work happens after the request has returned.</strong> Steps 1–3 take about 6 ms, and the chat opens straight away showing that Setu is typing. Steps 4–10 run on a worker thread, typically about 7 seconds. When Gemini is slow, the worker skips the order lookup after 25 s and the custom handoff note after 35 s. If the customer writes again during a reply, step 10 re-reads the case, keeps the new message and answers it next.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ================================================================== -->
+  <!--  FIGURE 3 — who answers                                              -->
+  <!-- ================================================================== -->
+  <section aria-labelledby="f3-title">
+    <div class="pair">
+      <div class="sheet">
+        <div class="sheet-head">
+          <h2 id="f3-title"><span class="fig">Fig. 3</span>Who answers a message</h2>
+          <span class="drawno">respond_to_customer() · handover_reason()</span>
+        </div>
+        <figure>
+          <div class="scroll">
+<svg class="dg narrow" viewBox="0 0 840 536" role="img" aria-label="Decision flow for every analysed message. If a person already handles the case, the assistant drafts for the agent. Otherwise, high or critical severity hands it to a person with a note in the customer's language. A cancellation, billing dispute or proposed write also goes to a person. A calm message with a help-article match of at least 0.65 is answered from the article and closed. Everything else gets an assistant reply in the customer's language and stays open.">
+  <defs>
+    <marker id="f3-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L10 5L0 10z" class="mk-ink"/></marker>
+  </defs>
+
+  <rect class="start" x="40" y="16" width="320" height="52" rx="10"/>
+  <g class="ic" transform="translate(56 31) scale(0.8333)" style="stroke-width:1.8"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></g>
+  <text class="tt" x="200" y="38" text-anchor="middle">Customer message analysed</text>
+  <text class="tm" x="200" y="56" text-anchor="middle">severity · intent · emotion · language</text>
+  <path class="ln" d="M200 68 V94" marker-end="url(#f3-ink)"/>
+
+  <rect class="decide" x="40" y="96" width="320" height="52" rx="26"/>
+  <text class="tt" x="200" y="127" text-anchor="middle">Is a person already handling it?</text>
+  <path class="ln" d="M200 148 V182" marker-end="url(#f3-ink)"/>
+  <text class="lbl" x="210" y="170">no</text>
+
+  <rect class="decide" x="40" y="184" width="320" height="52" rx="26"/>
+  <text class="tt" x="200" y="215" text-anchor="middle">Severity high or critical?</text>
+  <path class="ln" d="M200 236 V270" marker-end="url(#f3-ink)"/>
+  <text class="lbl" x="210" y="258">no</text>
+
+  <rect class="decide" x="40" y="272" width="320" height="52" rx="26"/>
+  <text class="tt" x="200" y="303" text-anchor="middle">Cancellation, billing dispute or a write?</text>
+  <path class="ln" d="M200 324 V358" marker-end="url(#f3-ink)"/>
+  <text class="lbl" x="210" y="346">no</text>
+
+  <rect class="decide" x="40" y="360" width="320" height="52" rx="26"/>
+  <text class="tt" x="200" y="391" text-anchor="middle">Help article ≥ 0.65 and risk low?</text>
+  <path class="ln" d="M200 412 V446" marker-end="url(#f3-ink)"/>
+  <text class="lbl" x="210" y="434">no</text>
+
+  <rect class="out-ai" x="40" y="448" width="320" height="64" rx="10"/>
+  <g class="ic ic-vio" transform="translate(58 469) scale(0.9167)" style="stroke-width:1.64"><path d="M12 3c.7 4.8 3.5 8 9 9-5.5 1-8.3 4.2-9 9-.7-4.8-3.5-8-9-9 5.5-1 8.3-4.2 9-9z"/></g>
+  <text class="tt" x="200" y="474" text-anchor="middle">Assistant replies</text>
+  <text class="tb" x="200" y="494" text-anchor="middle">in the customer's language · case stays open</text>
+
+  <!-- yes branches -->
+  <path class="ln" d="M360 122 H438" marker-end="url(#f3-ink)"/>
+  <text class="lbl" x="399" y="116" text-anchor="middle">yes</text>
+  <rect class="out-person" x="440" y="96" width="360" height="52" rx="10"/>
+  <g class="ic ic-acc" transform="translate(456 106) scale(0.625)" style="stroke-width:2.4"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="13" width="4" height="6" rx="1.5"/><rect x="17" y="13" width="4" height="6" rx="1.5"/><path d="M19 19v.5a2.5 2.5 0 0 1-2.5 2.5H13"/></g>
+  <text class="tt" x="477" y="118">Draft a reply for the agent</text>
+  <text class="tb" x="477" y="136">the assistant stays out of the thread</text>
+
+  <path class="ln" d="M360 210 H438" marker-end="url(#f3-ink)"/>
+  <text class="lbl" x="399" y="204" text-anchor="middle">yes</text>
+  <rect class="out-person" x="440" y="184" width="360" height="52" rx="10"/>
+  <g class="ic ic-acc" transform="translate(456 194) scale(0.625)" style="stroke-width:2.4"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7"/></g>
+  <text class="tt" x="477" y="206">Hand to a person</text>
+  <text class="tb" x="477" y="224">handoff note in their language · joins the queue</text>
+
+  <path class="ln" d="M360 298 H438" marker-end="url(#f3-ink)"/>
+  <text class="lbl" x="399" y="292" text-anchor="middle">yes</text>
+  <rect class="out-person" x="440" y="272" width="360" height="52" rx="10"/>
+  <g class="ic ic-acc" transform="translate(456 282) scale(0.625)" style="stroke-width:2.4"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7"/></g>
+  <text class="tt" x="477" y="294">Hand to a person</text>
+  <text class="tb" x="477" y="312">nothing that moves money runs without an admin</text>
+
+  <path class="ln" d="M360 386 H438" marker-end="url(#f3-ink)"/>
+  <text class="lbl" x="399" y="380" text-anchor="middle">yes</text>
+  <rect class="out-ai" x="440" y="360" width="360" height="52" rx="10"/>
+  <g class="ic ic-vio" transform="translate(456 370) scale(0.625)" style="stroke-width:2.4"><path d="M2.5 5H8a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2.5z"/><path d="M21.5 5H16a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h6.5z"/></g>
+  <text class="tt" x="477" y="382">Answer from the help article</text>
+  <text class="tb" x="477" y="400">closed as resolved by AI · counts as deflected</text>
+
+  <!-- key -->
+  <rect class="sw-person" x="440" y="468" width="12" height="12" rx="3"/>
+  <text class="lbl" x="460" y="478">a person answers</text>
+  <rect class="sw-ai" x="580" y="468" width="12" height="12" rx="3"/>
+  <text class="lbl" x="600" y="478">the assistant answers</text>
+  <text class="lbl-dim" x="440" y="504">if the model is unreachable at any step, the case</text>
+  <text class="lbl-dim" x="440" y="518">goes to a person with a “we have your message” note</text>
+</svg>
+          </div>
+          <figcaption><strong>The assistant answers only when nothing marks the case as needing a person.</strong> The checks run in this order on every customer message. A case a person has taken is never taken back by the assistant.</figcaption>
+        </figure>
+      </div>
+
+      <div class="sheet">
+        <div class="sheet-head">
+          <h2><span class="fig">Scale</span>Severity, per message</h2>
+          <span class="drawno">severity_of() · pipeline.py</span>
+        </div>
+        <div class="sev">
+          <p class="sub">Computed from the model's own readings rather than asked for as one more word, so every level comes with the rule that produced it. Higher always means worse.</p>
+          <div class="level">
+            <span class="pill p-crit"><i></i>Critical</span>
+            <div>
+              <ul>
+                <li>frustration ≥ 85</li>
+                <li>a threat: consumer court, legal action, police, social media</li>
+                <li>angry and high escalation risk</li>
+              </ul>
+              <div class="act person"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7"/></svg>goes to a person</div>
+            </div>
+          </div>
+          <div class="level">
+            <span class="pill p-high"><i></i>High</span>
+            <div>
+              <ul>
+                <li>frustration ≥ 70</li>
+                <li>high escalation risk, or angry</li>
+                <li>wants a cancellation or a complaint</li>
+              </ul>
+              <div class="act person"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7"/></svg>goes to a person</div>
+            </div>
+          </div>
+          <div class="level">
+            <span class="pill p-med"><i></i>Medium</span>
+            <div>
+              <ul>
+                <li>frustration ≥ 35, or negative</li>
+                <li>frustrated or anxious</li>
+                <li>urgent and unhappy</li>
+              </ul>
+              <div class="act ai"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.7 4.8 3.5 8 9 9-5.5 1-8.3 4.2-9 9-.7-4.8-3.5-8-9-9 5.5-1 8.3-4.2 9-9z"/></svg>the assistant answers, with a matching tone</div>
+            </div>
+          </div>
+          <div class="level">
+            <span class="pill p-low"><i></i>Low</span>
+            <div>
+              <ul><li>calm; nothing urgent</li></ul>
+              <div class="act ai"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.7 4.8 3.5 8 9 9-5.5 1-8.3 4.2-9 9-.7-4.8-3.5-8-9-9 5.5-1 8.3-4.2 9-9z"/></svg>the assistant answers</div>
+            </div>
+          </div>
+          <p class="note">Calibrated on the live model: a routine first “recharge failed, money taken” scores about 65 and stays with the assistant. The queue orders open cases by this scale, then by the longest wait.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================== -->
+  <!--  guarantees                                                          -->
+  <!-- ================================================================== -->
+  <section aria-labelledby="g-title">
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="g-title"><span class="fig">Table 1</span>Guarantees and where they are enforced</h2>
+        <span class="drawno">each backed by tests in tests/</span>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Guarantee</th><th>How</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1c.5-.1.9-.1 1.4-.1 5 0 8.9 4.3 10 7-.5 1.2-1.3 2.5-2.4 3.6"/><path d="M6.6 6.6C4.4 8 2.8 10.1 2 12c1.1 2.7 5 7 10 7 1.9 0 3.6-.6 5-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></span><span>A customer never sees the analysis</span></span></td><td>The customer serializer names every field it sends, so a new field cannot leak by default.</td><td>as_customer_case() · server.py</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 4h11"/><path d="M6.5 8.5h11"/><path d="M6.5 4H10a4.5 4.5 0 0 1 0 9H6.5l8 7.5"/></svg></span><span>No money moves without a person</span></span></td><td>Customers are never offered write tools. On an agent's turn the model can only propose a write; an admin approves it before it runs.</td><td>actions.py · tools_for()</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span><span>Personal data is redacted before any model call</span></span></td><td>Email, card numbers, order ids and phone numbers are swapped for placeholders, then restored in the reply.</td><td>Redactor · coach_core.py</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13l2.6-7.5h12.8L21 13v5.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg></span><span>A slow model never holds a ticket up</span></span></td><td>The request saves the message and returns; the model work runs on a worker thread.</td><td>record_customer_message() · AI_POOL</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></span><span>A message sent mid-reply is never lost</span></span></td><td>One worker per case; the commit re-reads the case under a lock and keeps anything that arrived.</td><td>_answer_latest() · server.py</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2"/><path d="M9.5 2.5h5"/></svg></span><span>Every model call has a ceiling</span></span></td><td>20 s per request and 45 s per call. A slow turn skips the order lookup after 25 s and the custom handoff after 35 s.</td><td>_call_model() · respond_to_customer()</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.5h.01"/></svg></span><span>Nobody sees a raw error</span></span></td><td>People get a plain message with a short reference; the full error goes to the log under the same reference.</td><td>failure() · hand_to_a_person()</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg></span><span>Analysis stays in English</span></span></td><td>Only the reply is written in the customer's language, so grouping, the queue and the dashboard read one vocabulary.</td><td>reply_instruction() · languages.py</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span>Each role sees only its workspace</span></span></td><td>Every route declares a minimum role or an exact one; sessions expire after 12 hours and five wrong passwords lock the account for 15 minutes.</td><td>require_role() · require_exact()</td></tr>
+            <tr><td><span class="gcell"><span class="gi"><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18"/><path d="M7 17v-5"/><path d="M12 17V7"/><path d="M17 17v-8"/></svg></span><span>The cost per case is honest</span></span></td><td>Every model call is metered under its own step, including embeddings, translation and handoffs.</td><td>report_usage() · metering.py</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="limits">
+        <h3><svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>Known limits of this build</h3>
+        <ul>
+          <li>It runs as one server process. The per-case locks and the worker queue live in memory, so it does not scale out across machines as it stands.</li>
+          <li>Street addresses are not redacted. Email, card numbers, order ids and phone numbers are.</li>
+          <li>The free Gemini tier allows 15 requests a minute per model, which is about three customer messages a minute.</li>
+          <li>orders.json stands in for a real order system.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>Drawn from the Setu source at commit e48cfc6, 27 September 2026. Timings are measured on this build.</footer>
+</div>
+</body>
+</html>

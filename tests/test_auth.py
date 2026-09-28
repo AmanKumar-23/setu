@@ -23,7 +23,7 @@ def client(srv, auth):
     srv.app.config["TESTING"] = True
 
     auth.create_user("priya", "agent-password", "agent")
-    auth.create_user("ravi", "lead-password", "lead")
+    auth.create_user("ravi", "lead-password", "admin")
     auth.create_user("root", "admin-password", "admin")
 
     return srv.app.test_client()
@@ -37,23 +37,40 @@ def sign_in(client, username, password):
 # --------------------------------------------------------------------------
 # Roles
 # --------------------------------------------------------------------------
-def test_roles_are_a_hierarchy_not_a_set(auth):
-    """Each role must imply every lesser one, or a check for "lead or better"
-    would silently exclude admins."""
-    assert auth.RANK["admin"] > auth.RANK["lead"] > auth.RANK["agent"]
+def test_staff_roles_are_a_hierarchy_not_a_set(auth):
+    """Admin must imply agent, or a check for "agent or better" would
+    silently exclude admins."""
+    assert auth.RANK["admin"] > auth.RANK["agent"]
+
+
+def test_customer_sits_below_every_staff_role(auth):
+    """Rank 0 is what makes every staff guard exclude a customer without any
+    of them being edited."""
+    assert auth.RANK["customer"] < auth.RANK["agent"] < auth.RANK["admin"]
+    assert auth.ROLES == ("customer", "agent", "admin")
+    assert "lead" not in auth.ROLES and "lead" not in auth.RANK
 
 
 def test_user_reports_what_its_role_can_reach(auth, client):
-    row = auth.find_user("ravi")
-    lead = auth.User(row)
+    agent = auth.User(auth.find_user("priya"))
 
-    assert lead.at_least("agent") and lead.at_least("lead")
-    assert not lead.at_least("admin")
+    assert agent.at_least("agent")
+    assert not agent.at_least("admin")
 
-    rights = lead.as_dict()
-    assert rights["can_see_dashboard"] is True
-    assert rights["can_allow_writes"] is True
+    rights = agent.as_dict()
+    assert rights["can_see_dashboard"] is False
+    assert rights["can_allow_writes"] is False
     assert rights["can_export"] is False
+    assert rights["landing"] == "/"
+
+
+def test_each_role_knows_where_it_belongs(auth, client):
+    """Every redirect after a wrong turn reads this, so it must be right for
+    all three."""
+    auth.create_user("cust", "customer-password", "customer")
+    assert auth.User(auth.find_user("cust")).landing == "/portal"
+    assert auth.User(auth.find_user("priya")).landing == "/"
+    assert auth.User(auth.find_user("ravi")).landing == "/dashboard"
 
 
 # --------------------------------------------------------------------------
@@ -179,11 +196,13 @@ def test_agent_cannot_arm_the_write_tools(srv, client):
     assert srv.session.allow_writes is False
 
 
-def test_lead_reaches_the_dashboard_but_not_the_exports(client):
-    sign_in(client, "ravi", "lead-password")
+def test_an_agent_reaches_neither_the_dashboard_nor_the_exports(client):
+    """The dashboard, the write-action gate and the exports all moved to
+    admin when lead was retired. An agent gets none of them."""
+    sign_in(client, "priya", "agent-password")
 
-    assert client.get("/api/stats").status_code == 200
-    assert client.post("/api/allow-writes", json={"allow": True}).status_code == 200
+    assert client.get("/api/stats").status_code == 403
+    assert client.post("/api/allow-writes", json={"allow": True}).status_code == 403
     assert client.get("/api/export.json").status_code == 403
     assert client.get("/api/cases.csv").status_code == 403
 
@@ -201,12 +220,28 @@ def test_pages_redirect_a_signed_out_visitor_to_the_login(client):
     assert "/login" in res.headers["Location"]
 
 
-def test_agent_opening_the_dashboard_page_is_sent_to_denied_not_login(client):
-    """Bouncing them to a login they are already past would be a loop."""
+def test_a_wrong_turn_goes_to_your_own_workspace(client, auth):
+    """Not a 403 page, and not the login they are already past. You are put
+    back where you belong."""
     sign_in(client, "priya", "agent-password")
     res = client.get("/dashboard")
     assert res.status_code == 302
-    assert res.headers["Location"].endswith("/denied")
+    assert res.headers["Location"].endswith("/")        # the agent console
+
+    auth.create_user("cust", "customer-password", "customer")
+    sign_in(client, "cust", "customer-password")
+    res = client.get("/")
+    assert res.status_code == 302
+    assert res.headers["Location"].endswith("/portal")
+
+
+def test_staff_cannot_wander_into_the_customer_portal(client):
+    """require_exact, not a floor: admin outranks customer but still does not
+    belong in the customer's workspace."""
+    sign_in(client, "ravi", "lead-password")
+    res = client.get("/portal")
+    assert res.status_code == 302
+    assert res.headers["Location"].endswith("/dashboard")
 
 
 # --------------------------------------------------------------------------

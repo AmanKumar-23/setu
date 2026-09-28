@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Setu — AI customer support for India. AI where it's safe. Human where it matters.">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon.png" sizes="32x32" type="image/png">
+<title>Your tickets · Setu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F5F4F1; --surface:#FFFFFF; --surface-2:#FAFAF8; --surface-3:#F2F1ED;
+  --ink:#16181C; --ink-2:#5A6069; --ink-3:#8B929B;
+  --line:#EAE8E3; --line-2:#E0DDD6;
+  --brand:#EF4E2B; --brand-600:#D8401F; --brand-bg:#FEF0EC;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  --sh-1:0 1px 2px rgba(16,24,40,.05);
+  --sh-2:0 1px 3px rgba(16,24,40,.06), 0 8px 24px -6px rgba(16,24,40,.10);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+/* A conversation is a fixed shell: header, thread, composer. The thread is
+   the only thing that scrolls, which is what lets it size to its content and
+   still stay put. min-height alone would let the document grow instead, and
+   then the thread never reaches its own overflow. */
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+  height:100vh;height:100dvh;overflow:hidden;
+  display:flex;flex-direction:column}
+
+.appbar{flex:0 0 auto;background:var(--surface);border-bottom:1px solid var(--line);
+  padding:11px 20px;display:flex;align-items:center;gap:14px;box-shadow:var(--sh-1)}
+.brand{display:flex;align-items:center;gap:11px}
+.logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  background:linear-gradient(140deg,#FF6B3D,var(--brand) 60%,#D8401F);
+  color:#fff;font-weight:800;font-size:21px;letter-spacing:-.02em}
+.bname{font-size:15px;font-weight:750;letter-spacing:-.02em;line-height:1.1}
+/* ---------- the brand mark ----------
+   "से" and "सेतु" are real text, never an image: they stay selectable,
+   scale with the page and never blur on a retina screen. Devanagari sits
+   high in its em box, so a geometrically centred glyph reads as lifted --
+   the nudge leaves the शिरोरेखा an even distance from the badge edge. The
+   weight is inherited so "सेतु" and "· Setu" sit at the same weight and
+   on the same baseline. */
+.dev{font-family:"Noto Sans Devanagari","Mukta","Nirmala UI","Mangal",sans-serif}
+.logo .dev{display:block;line-height:1;font-weight:700;
+  transform:translateY(3px)}
+.btag{font-size:10.5px;color:var(--ink-3);font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;margin-top:1px;white-space:nowrap}
+.grow{flex:1}
+.me{display:flex;align-items:center;gap:9px;padding:4px 5px 4px 4px;
+  border:1px solid var(--line);border-radius:999px;background:var(--surface-2)}
+.me .av{width:26px;height:26px;flex:0 0 26px;border-radius:50%;display:grid;
+  place-items:center;font-size:11px;font-weight:800;color:#fff;
+  background:linear-gradient(140deg,#FF6B3D,var(--brand) 60%,#D8401F)}
+.me .mn{font-size:12.5px;font-weight:650;line-height:1.2}
+.me .mr{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);margin-top:1px}
+.me .out{width:26px;height:26px;border:0;border-radius:50%;background:transparent;
+  color:var(--ink-3);cursor:pointer;font-size:13px;transition:.15s}
+.melink{display:flex;align-items:center;gap:9px;color:inherit;
+  text-decoration:none;border-radius:999px}
+.melink:hover .mn{color:var(--brand)}
+.me .out:hover{background:var(--surface-3);color:var(--brand)}
+
+/* The same 24px gutter as the ticket list, so the two pages read as one
+   product. The conversation gets the width it needs to be read comfortably
+   on a laptop instead of a 760px column with a field of empty page either
+   side of it. */
+main{flex:1;padding:22px 24px 30px;display:flex;justify-content:center;min-height:0}
+.wrap{width:100%;max-width:1120px;display:flex;flex-direction:column;
+  min-height:0;flex:1}
+
+.strip{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:12px 15px;box-shadow:var(--sh-1);margin-bottom:14px;flex:0 0 auto}
+.strip .cid{font-family:var(--mono);font-size:12.5px;font-weight:700}
+.strip .subj{font-size:13.5px;font-weight:650;color:var(--ink);min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.strip .grow{flex:1}
+.back{height:32px;padding:0 12px;border-radius:9px;border:1px solid var(--line-2);
+  background:var(--surface);color:var(--ink-2);font-size:12px;font-weight:650;
+  cursor:pointer;font-family:var(--sans);transition:.15s}
+.back:hover{border-color:var(--brand);color:var(--brand)}
+
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;
+  font-size:11.5px;font-weight:700;white-space:nowrap}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.pill.green{background:#E7F5EC;color:#0B8A4B}
+.pill.amber{background:#FDF2E0;color:#C97A00}
+.pill.grey{background:var(--surface-3);color:var(--ink-3)}
+
+/* Sized to its content and pinned to the bottom, so one message sits just
+   above the composer instead of floating at the top of a tall empty panel.
+   flex-shrink lets it give way once the conversation is longer than the
+   space available, and only then does it scroll.
+
+   margin-top:auto rather than justify-content:flex-end on purpose: with
+   justify-content the overflowing top of a long thread becomes unreachable
+   in every browser, because there is no scrollable area above the start. */
+.thread{flex:0 1 auto;min-height:0;margin-top:auto;overflow-y:auto;
+  background:var(--surface);border:1px solid var(--line);border-radius:18px;
+  box-shadow:var(--sh-2);padding:20px;display:flex;flex-direction:column;gap:14px}
+/* A bubble should stay a readable column even when the page is very wide. */
+.turn{max-width:70%;display:flex;flex-direction:column}
+.turn.mine{align-self:flex-end;align-items:flex-end}
+.turn.theirs{align-self:flex-start}
+.who{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:5px}
+.bubble{padding:12px 15px;border-radius:15px;font-size:13.5px;line-height:1.6;
+  white-space:pre-wrap;word-break:break-word}
+.turn.theirs .bubble{background:var(--surface-3);color:var(--ink);
+  border-bottom-left-radius:5px}
+.turn.mine .bubble{background:linear-gradient(140deg,#FF6B3D,var(--brand) 62%,#D8401F);
+  color:#fff;border-bottom-right-radius:5px}
+.sysline{align-self:center;max-width:90%;text-align:center;font-size:12px;
+  color:#C97A00;background:#FDF2E0;border:1px solid #F3DDB4;border-radius:999px;
+  padding:6px 14px;font-weight:600}
+
+/* ---------- rating ---------- */
+.rate{flex:0 0 auto;margin-top:14px;background:var(--surface);
+  border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh-1);
+  padding:16px 18px}
+.rate.done{background:#E7F5EC;border-color:#BFE3CD}
+.rate h3{font-size:14px;font-weight:750;letter-spacing:-.01em;margin-bottom:3px}
+.rate .sub{font-size:12.5px;color:var(--ink-3);margin-bottom:13px}
+.stars{display:flex;gap:5px;margin-bottom:12px}
+.star{width:38px;height:38px;border-radius:11px;border:1px solid var(--line-2);
+  background:var(--surface-2);cursor:pointer;font-size:19px;line-height:1;
+  display:grid;place-items:center;transition:.14s;color:var(--ink-3)}
+.star:hover{border-color:#F0A88F;transform:translateY(-1px)}
+.star.on{background:#FFF6E5;border-color:#F0C674;color:#E8A317}
+.rate textarea{width:100%;min-height:62px;resize:vertical;padding:10px 12px;
+  border-radius:11px;border:1px solid var(--line-2);background:var(--surface-2);
+  color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.55;
+  outline:none;transition:.15s;margin-bottom:11px}
+.rate textarea:focus{border-color:#F0A88F;background:var(--surface);
+  box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
+.rate .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rate .msg{font-size:12.5px;color:var(--ink-2)}
+.rate .err{color:#D6382F;font-weight:600}
+.given{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.given .shown{font-size:19px;letter-spacing:2px;color:#E8A317}
+.given .words{font-size:13px;color:var(--ink-2);font-style:italic}
+.linkish{background:none;border:0;padding:0;color:var(--brand);font-size:12.5px;
+  font-weight:650;cursor:pointer;font-family:var(--sans);text-decoration:underline}
+
+/* ---------- header controls ---------- */
+.hctl{display:flex;align-items:center;gap:8px;margin-right:4px}
+.lang{height:34px;padding:0 30px 0 11px;border-radius:10px;border:1px solid var(--line-2);
+  background:var(--surface) url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238B929B' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color:var(--ink);font-family:var(--sans);font-size:13px;font-weight:600;
+  cursor:pointer;appearance:none;outline:none;transition:.15s}
+.lang:hover{border-color:var(--brand)}
+.lang:focus{border-color:#F0A88F;box-shadow:0 0 0 3px rgba(239,78,43,.11)}
+.vtoggle{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;
+  border-radius:10px;border:1px solid var(--line-2);background:var(--surface);
+  color:var(--ink-2);font-size:12px;font-weight:650;cursor:pointer;
+  font-family:var(--sans);transition:.15s;white-space:nowrap}
+.vtoggle:hover{border-color:var(--brand);color:var(--brand)}
+.vtoggle[aria-pressed="false"]{opacity:.6}
+.vdot{width:7px;height:7px;border-radius:50%;background:#0B8A4B;display:block}
+.vtoggle[aria-pressed="false"] .vdot{background:var(--ink-3)}
+
+/* ---------- per-message voice ---------- */
+.who .viamic{margin-left:5px;opacity:.75;letter-spacing:0}
+.play{margin-top:6px;align-self:flex-start;height:26px;padding:0 10px;border-radius:8px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);
+  font-family:var(--sans);font-size:11px;font-weight:650;cursor:pointer;transition:.15s}
+.play:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-bg)}
+.play[data-on="1"]{background:var(--brand);border-color:var(--brand);color:#fff}
+
+/* ---------- the offer to switch language ---------- */
+.offer{flex:0 0 auto;margin-top:12px;display:flex;align-items:center;gap:10px;
+  flex-wrap:wrap;padding:11px 14px;border-radius:13px;
+  border:1px solid #CBD9F0;background:#EEF4FD}
+.offer .q{flex:1;min-width:190px;font-size:13px;font-weight:600;color:var(--ink)}
+.offer button{height:30px;padding:0 13px;border-radius:9px;border:1px solid var(--line-2);
+  background:var(--surface);color:var(--ink-2);font-family:var(--sans);
+  font-size:12px;font-weight:650;cursor:pointer;transition:.15s}
+.offer button:hover{border-color:var(--brand);color:var(--brand)}
+.offer button.yes{background:var(--brand);border-color:var(--brand);color:#fff}
+.offer button.yes:hover{filter:brightness(1.05);color:#fff}
+
+/* ---------- the player bar ---------- */
+.player{flex:0 0 auto;margin-top:12px;display:flex;align-items:center;gap:11px;
+  padding:9px 13px;border-radius:13px;border:1px solid var(--line);
+  background:var(--surface-2)}
+.player .pbtn{height:30px;padding:0 13px;border-radius:9px;border:1px solid var(--brand);
+  background:var(--brand);color:#fff;font-family:var(--sans);font-size:12px;
+  font-weight:700;cursor:pointer;transition:.15s;flex:0 0 auto}
+.player .pbtn:hover{filter:brightness(1.05)}
+.player .pwhat{flex:1;min-width:0;font-size:12px;color:var(--ink-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.player .plang{flex:0 0 auto;font-size:11px;font-weight:700;color:var(--ink-2);
+  background:var(--surface);border:1px solid var(--line-2);border-radius:7px;
+  padding:3px 8px}
+
+.mic{width:42px;height:42px;flex:0 0 42px;border-radius:12px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);
+  font-size:16px;cursor:pointer;display:grid;place-items:center;transition:.15s}
+.mic:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-bg)}
+.mic[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:#fff;
+  animation:micpulse 1.4s ease-out infinite}
+@keyframes micpulse{70%{box-shadow:0 0 0 12px rgba(239,78,43,0)}
+  100%{box-shadow:0 0 0 0 rgba(239,78,43,0)}}
+.mic:disabled{opacity:.4;cursor:not-allowed}
+.ghost{flex:0 0 auto;margin-top:7px;font-size:13px;color:var(--ink-3);
+  font-style:italic;line-height:1.5}
+.lowconf{flex:0 0 auto;margin-top:7px;font-size:11.5px;font-weight:600;color:#C97A00;
+  background:#FDF2E0;border-radius:9px;padding:6px 10px;align-self:flex-start}
+
+.composer{flex:0 0 auto;margin-top:14px;display:flex;gap:10px;align-items:flex-end}
+.composer textarea{flex:1;min-width:0}
+
+/* Every display: rule above is declared after the UA's [hidden]{display:none}
+   and beats it on equal specificity, so hidden alone would not hide them. */
+.offer[hidden],.player[hidden],.ghost[hidden],.lowconf[hidden],
+.play[hidden],.me[hidden],.rate[hidden]{display:none}
+textarea{flex:1;min-height:44px;max-height:140px;resize:none;padding:12px 14px;
+  border-radius:13px;border:1px solid var(--line-2);background:var(--surface);
+  color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.55;
+  outline:none;transition:.15s}
+textarea:focus{border-color:#F0A88F;box-shadow:0 0 0 3.5px rgba(239,78,43,.11)}
+.send{height:44px;padding:0 20px;border-radius:13px;border:0;cursor:pointer;
+  background:linear-gradient(140deg,#FF6B3D,var(--brand) 62%,#D8401F);color:#fff;
+  font-family:var(--sans);font-size:13.5px;font-weight:700;transition:.15s;
+  box-shadow:0 1px 2px rgba(216,64,31,.28),0 8px 20px -8px rgba(216,64,31,.5)}
+.send:hover{filter:brightness(1.05)}
+.send:disabled{opacity:.55;cursor:not-allowed}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.4);
+  border-top-color:#fff;display:inline-block;animation:sp .7s linear infinite;
+  vertical-align:-2px;margin-right:7px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.thinking{align-self:flex-start;font-size:12.5px;color:var(--ink-3);padding:4px 2px}
+.typing .bubble{display:flex;align-items:center;gap:9px;color:var(--ink-3);
+  font-size:12.5px}
+.dots{display:inline-flex;gap:4px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--ink-3);display:block;
+  animation:blink 1.2s infinite ease-in-out}
+.dots i:nth-child(2){animation-delay:.18s}
+.dots i:nth-child(3){animation-delay:.36s}
+@keyframes blink{0%,80%,100%{opacity:.25;transform:translateY(0)}
+  40%{opacity:1;transform:translateY(-2px)}}
+
+/* Below 900px the column cap does nothing but waste the screen, so the
+   conversation simply takes the width it is given. The gutter stays. */
+@media (max-width:900px){
+  .wrap{max-width:none}
+  .turn{max-width:86%}
+}
+
+/* The app bar was a single unwrapping row: below roughly 640px the user chip
+   was pushed past the edge and took the whole page scrolling sideways with
+   it. It wraps now, and the role label goes -- it is the one thing on the
+   bar a customer already knows. */
+@media (max-width:640px){
+  .appbar{flex-wrap:wrap;row-gap:9px;padding:10px 16px;gap:10px}
+  .appbar .grow{flex:1 1 100%;height:0}
+  .brand{flex:0 1 auto;min-width:0}
+  .me{margin-left:auto}
+  .me .mr{display:none}
+  main{padding:14px 16px 20px}
+}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">
+    <div class="logo"><span class="dev">से</span></div>
+    <div>
+      <div class="bname"><span class="dev">सेतु</span> · Setu</div>
+      <div class="btag" data-i18n="header.subtitle">Customer portal</div>
+    </div>
+  </div>
+  <div class="grow"></div>
+  <div class="hctl">
+    <select class="lang" id="langPick" aria-label="Language"
+            data-i18n-aria="language"></select>
+    <button class="vtoggle" id="voiceToggle" aria-pressed="true"
+            data-i18n-title="voice.turnOff">
+      <span class="vdot"></span><span data-i18n="voice.button">Voice</span></button>
+  </div>
+  <div class="me" id="me" hidden>
+    <a class="melink" href="/portal/profile" data-i18n-title="profile.open">
+      <span class="av" id="meAv">?</span>
+      <span>
+        <span class="mn" id="meName" data-i18n-exempt>&mdash;</span>
+        <span class="mr" id="meRole" data-i18n-exempt>&mdash;</span>
+      </span>
+    </a>
+    <button class="out" id="signOut" data-i18n-title="signOut"
+            data-i18n-aria="signOut">&#9211;</button>
+  </div>
+</div>
+
+<main>
+  <div class="wrap">
+    <div class="strip">
+      <button class="back" id="backBtn" data-i18n="chat.back">&larr; All tickets</button>
+      <span class="cid" id="cid" data-i18n-exempt>&mdash;</span>
+      <span class="subj" id="subj" data-i18n-exempt></span>
+      <span class="grow"></span>
+      <span class="pill grey" id="statePill"><i></i><span id="stateLabel">&mdash;</span></span>
+    </div>
+
+    <div class="thread" id="thread"></div>
+
+    <div class="offer" id="offer" hidden>
+      <span class="q" id="offerQ"></span>
+      <button class="yes" id="offerYes" data-i18n="offer.yes">Yes, switch</button>
+      <button id="offerNo">No, keep English</button>
+    </div>
+
+    <div class="rate" id="rateCard" hidden></div>
+
+    <div class="player" id="player" hidden>
+      <button class="pbtn" id="playerBtn"><span aria-hidden="true">&#9654;</span>
+        <span data-i18n="player.playLatest">Play latest reply</span></button>
+      <span class="pwhat" id="playerWhat" data-i18n-exempt></span>
+      <span class="plang" id="playerLang" data-i18n-exempt></span>
+    </div>
+
+    <div class="ghost" id="ghost" data-i18n-exempt hidden></div>
+    <div class="lowconf" id="lowconf" hidden></div>
+
+    <div class="composer">
+      <textarea id="input" rows="1" data-i18n-ph="chat.placeholder"
+                placeholder="Type your message&hellip;"></textarea>
+      <button class="mic" id="mic" aria-pressed="false"
+              data-i18n-title="voice.speakInstead">&#127908;</button>
+      <button class="send" id="sendBtn" data-i18n="chat.send">Send</button>
+    </div>
+  </div>
+</main>
+
+<script src="/static/i18n.js"></script>
+<script src="/static/voice.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const CASE_ID = location.pathname.split("/").filter(Boolean).pop();
+let busy = false;
+let spoken = false;     // did the text in the box arrive by voice?
+let TICKET = null;      // the case we last painted, so a language change can repaint
+const T = (key, vars) => SC.t(key, vars);
+
+/* The pill arrives as the English label the server chose; it is looked up by
+   that text. An unknown one falls through unchanged rather than vanishing. */
+const statusText = label => SC.strings["status." + label] || label;
+
+/* Everything on this page comes from as_customer_case(). There is no field
+   here for sentiment, risk, gates, scores or lookups, because the server
+   never sends one. */
+function render(t){
+  // Held so a language change repaints the same conversation without refetching.
+  TICKET = t || TICKET;
+  if(!TICKET) return;
+  t = TICKET;
+
+  $("cid").textContent = t.id;
+  $("subj").textContent = t.subject;
+  $("stateLabel").textContent = statusText(t.status_label);
+  $("statePill").className = "pill " + t.status_tone;
+
+  const thread = $("thread");
+  thread.innerHTML = "";
+
+  (t.messages || []).forEach(m => {
+    const mine = m.speaker === "customer";
+    const turn = document.createElement("div");
+    turn.className = "turn " + (mine ? "mine" : "theirs");
+
+    const who = document.createElement("div");
+    who.className = "who";
+    who.textContent = m.from;
+    who.setAttribute("data-i18n-exempt", "");
+    if(m.by_voice){
+      // So it is obvious later which lines were spoken rather than typed.
+      const mic = document.createElement("span");
+      mic.className = "viamic";
+      mic.textContent = "\uD83C\uDF99";
+      mic.title = T("chat.sentByVoice");
+      who.appendChild(mic);
+    }
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    // The customer's own words, and the reply written for them. Never
+    // translated by this page, in any language.
+    bubble.textContent = m.text;
+    bubble.setAttribute("data-i18n-exempt", "");
+
+    turn.appendChild(who);
+    turn.appendChild(bubble);
+
+    if(m.playable) turn.appendChild(playButton(m.text, m.language));
+    thread.appendChild(turn);
+  });
+
+  // A human is coming. Shown when the ticket is with a person and the last
+  // thing said was the customer's -- i.e. nothing answered them yet.
+  const msgs = t.messages || [];
+  const last = msgs[msgs.length - 1];
+  if(t.ai_pending){
+    // The assistant is writing. Say so, where the reply will appear.
+    const typing = document.createElement("div");
+    typing.className = "turn theirs typing";
+    typing.innerHTML = '<div class="bubble"><span class="dots"><i></i><i></i><i></i></span>'
+                     + '<span class="tlabel"></span></div>';
+    typing.querySelector(".tlabel").textContent = T("chat.typing");
+    thread.appendChild(typing);
+  } else if(t.status === "human_reviewing" && last && last.speaker === "customer"){
+    const line = document.createElement("div");
+    line.className = "sysline";
+    line.textContent = T("chat.humanJoining");
+    thread.appendChild(line);
+  }
+
+  thread.scrollTop = thread.scrollHeight;
+  renderRating(t);
+  watchForReply(t);
+  renderPlayer(t);
+  renderOffer(t);
+}
+
+/* ---------------- audio playback ----------------
+   One button per AI reply, plus a bar that always holds the newest one.
+   Only one utterance is ever in flight: SC.speak cancels whatever is
+   playing before it starts. */
+
+function playButton(text, lang){
+  const b = document.createElement("button");
+  b.className = "play";
+  b.type = "button";
+  b.textContent = "\u25B6 " + T("play.play");
+  b.hidden = !(SC.canSpeak && SC.voiceOn);
+  b.dataset.play = "1";
+  b.dataset.lang = lang || "";
+  paintVoiceState(b, lang);
+  b.onclick = () => {
+    if(b.dataset.on === "1"){ SC.stop(); return; }
+    SC.speak(text, lang,
+             () => { b.dataset.on = "1"; b.textContent = "\u25A0 " + T("play.stop"); },
+             () => { b.dataset.on = "";  b.textContent = "\u25B6 " + T("play.play"); });
+  };
+  return b;
+}
+
+/* No voice for this language on this device: the button stays, disabled,
+   and says why. Hiding it would look like the reply simply has no audio. */
+function paintVoiceState(button, lang){
+  const ok = SC.canSpeakIn(lang);
+  button.disabled = ok === false;
+  button.title = ok === false ? T("play.noVoice", {lang: langName(lang)}) : "";
+}
+
+function langName(code){
+  return code === "hinglish" ? "Hinglish" : SC.nativeName(code);
+}
+
+// Chrome delivers its voice list after the page has drawn. Re-check then.
+SC.onVoices(() => {
+  document.querySelectorAll("[data-play]").forEach(b => paintVoiceState(b, b.dataset.lang));
+  if(latest) paintVoiceState($("playerBtn"), latest.language);
+});
+
+let latest = null;              // {text, language} -- what the bar plays
+
+function renderPlayer(t){
+  const msgs = (t.messages || []).filter(m => m.playable);
+  latest = msgs.length ? msgs[msgs.length - 1] : null;
+  const bar = $("player");
+  if(!latest || !SC.canSpeak || !SC.voiceOn){ bar.hidden = true; return; }
+  bar.hidden = false;
+  if($("playerBtn").dataset.on !== "1"){
+    $("playerBtn").textContent = "\u25B6 " + T("player.playLatest");
+  }
+  $("playerWhat").textContent = latest.text;
+  $("playerLang").textContent = langName(latest.language);
+  paintVoiceState($("playerBtn"), latest.language);
+}
+
+$("playerBtn").onclick = () => {
+  if(!latest) return;
+  const b = $("playerBtn");
+  if(b.dataset.on === "1"){ SC.stop(); return; }
+  SC.speak(latest.text, latest.language,
+           () => { b.dataset.on = "1"; b.textContent = "\u25A0 " + T("play.stop"); },
+           () => { b.dataset.on = "";  b.textContent = "\u25B6 " + T("player.playLatest"); });
+};
+
+/* ---------------- the offer to switch language ----------------
+   Shown once per ticket, and only when what the customer WROTE is not the
+   language we are ANSWERING in. Accepting changes the language from here on;
+   nothing already sent is rewritten, and nothing switches on its own. */
+
+function offerKey(lang){ return "sc.uioffer." + lang; }
+
+/* The reply already follows whatever language the customer writes in, so
+   nothing about the ANSWER needs offering. What is worth offering is the
+   interface: if they are writing in Tamil and the buttons are in English,
+   ask -- once per language -- whether to show Setu in Tamil. Never switched
+   without asking. */
+function renderOffer(t){
+  const box = $("offer");
+  const mine = (t.messages || []).filter(m => m.speaker === "customer");
+  const wrote = mine.length ? mine[mine.length - 1].language : "";
+  const offerable = wrote && SC.languages[wrote] && wrote !== SC.language;
+  if(!offerable || SC.get(offerKey(wrote), "") === "asked"){
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  $("offerQ").textContent = T("offer.question", {lang: SC.nativeName(wrote)});
+  $("offerNo").textContent = T("offer.no", {lang: SC.nativeName()});
+
+  const settle = () => { SC.set(offerKey(wrote), "asked"); box.hidden = true; };
+  $("offerYes").onclick = () => {
+    settle();
+    SC.setLanguage(wrote);
+    const pick = $("langPick");
+    if(pick) pick.value = wrote;
+  };
+  $("offerNo").onclick = settle;
+}
+
+let picked = 0;
+
+/* Only ever shown on a closed ticket. The server decides that -- can_rate --
+   so this page never has to reason about statuses it should not know. */
+function renderRating(t){
+  const card = $("rateCard");
+  if(!t.can_rate){ card.hidden = true; return; }
+  card.hidden = false;
+
+  // Already rated and the window has closed: show it, read only.
+  if(t.rating && !t.rating_editable){
+    card.className = "rate done";
+    card.innerHTML = `<h3>${esc(T("rate.thanks"))}</h3>
+      <div class="given">
+        <span class="shown">${"★".repeat(t.rating)}${"☆".repeat(5 - t.rating)}</span>
+        <span class="words" data-words data-i18n-exempt></span>
+      </div>`;
+    card.querySelector("[data-words]").textContent = t.rating_comment || "";
+    return;
+  }
+
+  const rated = Boolean(t.rating);
+  picked = t.rating || 0;
+  card.className = "rate" + (rated ? " done" : "");
+  card.innerHTML = `
+    <h3>${esc(T(rated ? "rate.titleDone" : "rate.title"))}</h3>
+    <div class="sub">${rated
+      ? esc(T("rate.subDone"))
+      : esc(T("rate.sub"))}</div>
+    <div class="stars" id="stars" role="group" aria-label="${esc(T("rate.ariaStars"))}">
+      ${[1,2,3,4,5].map(n => `<button type="button" class="star" data-n="${n}"
+          aria-label="${n} star${n === 1 ? "" : "s"}">★</button>`).join("")}
+    </div>
+    <textarea id="rateNote" maxlength="280"
+      placeholder="${esc(T("rate.placeholder"))}"></textarea>
+    <div class="row">
+      <button class="send" id="rateSend" style="height:36px;padding:0 16px;
+        font-size:12.5px">${esc(T(rated ? "rate.update" : "rate.send"))}</button>
+      <span class="msg" id="rateMsg"></span>
+    </div>`;
+
+  $("rateNote").value = t.rating_comment || "";
+  paintStars();
+
+  card.querySelectorAll(".star").forEach(b => {
+    b.onclick = () => { picked = Number(b.dataset.n); paintStars(); };
+  });
+  $("rateSend").onclick = sendRating;
+}
+
+function paintStars(){
+  document.querySelectorAll("#stars .star").forEach(b =>
+    b.classList.toggle("on", Number(b.dataset.n) <= picked));
+}
+
+async function sendRating(){
+  const msg = $("rateMsg");
+  msg.className = "msg";
+  if(!picked){
+    msg.className = "msg err";
+    msg.textContent = T("rate.pickStar");
+    return;
+  }
+
+  $("rateSend").disabled = true;
+  msg.textContent = T("rate.sending");
+  try{
+    const d = await (await fetch(`/api/portal/cases/${CASE_ID}/rating`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({score: picked, comment: $("rateNote").value.trim()}),
+    })).json();
+
+    if(!d.ok){
+      msg.className = "msg err";
+      msg.textContent = d.error || T("rate.couldNotSave");
+      $("rateSend").disabled = false;
+      return;
+    }
+    render(d.ticket);            // repaints the card in its "rated" state
+  }catch(e){
+    msg.className = "msg err";
+    msg.textContent = T("err.unreachable");
+    $("rateSend").disabled = false;
+  }
+}
+
+/* While the assistant is writing, check back until the reply lands. Quick
+   at first, because a good answer takes a few seconds; then more slowly, so
+   a model having a bad day is not hammered with requests. */
+let watch = null, watchDelay = 900;
+
+function watchForReply(t){
+  clearTimeout(watch);
+  if(!t || !t.ai_pending){ watchDelay = 900; return; }
+  watch = setTimeout(async () => {
+    watchDelay = Math.min(watchDelay * 1.35, 4000);
+    await load();
+  }, watchDelay);
+}
+
+async function load(){
+  try{
+    const d = await (await fetch("/api/portal/cases/" + CASE_ID)).json();
+    if(!d.ok){ location.href = "/portal?error=not-your-ticket"; return; }
+    render(d.ticket);
+  }catch(e){ /* keep what is on screen */ }
+}
+
+async function send(){
+  const text = $("input").value.trim();
+  if(busy || !text) return;
+
+  SC.stopDictation();
+  const channel = spoken ? "voice" : "typed";
+  spoken = false;
+  $("ghost").hidden = true;
+  $("lowconf").hidden = true;
+
+  busy = true;
+  $("sendBtn").disabled = true;
+  $("sendBtn").innerHTML = '<span class="spin"></span>' + esc(T("chat.sending"));
+  $("input").value = "";
+  $("input").style.height = "auto";
+
+  try{
+    const d = await (await fetch(`/api/portal/cases/${CASE_ID}/message`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text, channel}),
+    })).json();
+    if(d.ok) render(d.ticket); else await load();
+  }catch(e){ await load(); }
+
+  busy = false;
+  $("sendBtn").disabled = false;
+  $("sendBtn").textContent = T("chat.send");
+  $("input").focus();
+}
+
+$("sendBtn").onclick = send;
+$("backBtn").onclick = () => { location.href = "/portal"; };
+$("input").addEventListener("input", e => {
+  e.target.style.height = "auto";
+  e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
+});
+$("input").addEventListener("keydown", e => {
+  if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); send(); }
+});
+
+(async () => {
+  try{
+    const me = await (await fetch("/api/me")).json();
+    if(me && me.ok){
+      const u = me.user;
+      $("meName").textContent = u.display_name;
+      $("meRole").textContent = u.role;
+      $("meAv").textContent = (u.display_name || u.username).trim()[0].toUpperCase();
+      $("me").hidden = false;
+    }
+  }catch(e){}
+  await load();
+  $("input").focus();
+})();
+
+$("signOut").onclick = async () => {
+  await fetch("/api/logout", {method: "POST"}).catch(() => {});
+  location.href = "/login";
+};
+
+/* ---------------- language + voice ---------------- */
+
+SC.mountVoiceToggle($("voiceToggle"));
+
+const mic = SC.attachMic($("mic"), $("input"), {
+  ghost: $("ghost"),
+  hint: $("lowconf"),
+  onVoice: () => { spoken = true; },       // never sends; only labels
+});
+
+SC.onVoiceChange(on => {
+  on ? mic.enable() : mic.disable();
+  if(!on) SC.stop();
+  $("player").hidden = !(on && latest && SC.canSpeak);
+  document.querySelectorAll("[data-play]").forEach(b => {
+    b.hidden = !(on && SC.canSpeak);
+  });
+});
+
+/* Runs on every switch -- immediately from the seed or this browser's cache,
+   and again if the server sends back a fuller catalogue. It repaints what is
+   on screen; it never reloads and never refetches the conversation. */
+SC.mountPicker($("langPick"), () => {
+  SC.paintStatic();
+  render();                       // the thread, from the case we already hold
+  if(SC.canDictate && !$("mic").disabled){
+    $("mic").title = T("voice.speakInstead");
+  }
+  if(latest) $("playerLang").textContent = langName(latest.language);
+});
+</script>
+</body>
+</html>

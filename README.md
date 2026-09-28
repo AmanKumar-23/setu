@@ -1,20 +1,45 @@
 <div align="center">
 
-<img src="docs/images/logo.svg" alt="Support Coach" width="440">
+<img src="docs/images/logo.svg" alt="सेतु · Setu" width="440">
 
-### Real-time coaching for customer support agents — built for how India actually writes
+### AI where it's safe. Human where it matters.
 
-[![CI](https://github.com/AmanKumar-23/support-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/AmanKumar-23/support-coach/actions/workflows/ci.yml)
+**सेतु** (*setu*) is Hindi for **bridge** — which is the whole job: carrying a
+customer across to an answer, and carrying them to a person the moment a
+machine should not be the one deciding.
+
+[![CI](https://github.com/AmanKumar-23/setu/actions/workflows/ci.yml/badge.svg)](https://github.com/AmanKumar-23/setu/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-16a34a.svg)](LICENSE)
-[![Gemini](https://img.shields.io/badge/Gemini-3.5%20Flash-4285F4?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![Gemini](https://img.shields.io/badge/Gemini-3.5%20Flash--Lite-4285F4?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![Languages](https://img.shields.io/badge/replies-10%20languages%20%2B%20Hinglish-EF4E2B)](app/languages.py)
 [![Code style: ruff](https://img.shields.io/badge/style-ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
 
-**Reads the customer's mood as the chat happens · Looks up the real order · Drafts the reply · Scores the agent**
+**Answers customers in their own language · Reads every message for risk · Hands the hard ones to a person · Coaches the agent who picks them up**
 
-[Quick start](#quick-start) · [Why this exists](#why-this-exists) · [Architecture](#architecture) · [Contributing](CONTRIBUTING.md)
+[See it](#see-it) · [Why this exists](#why-this-exists) · [Quick start](#quick-start) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
 </div>
+
+---
+
+## See it
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/portal-chat.png" alt="The customer chat: Hindi, English and Hinglish replies, each with a Play button">
+<p align="center"><sub><b>Customer portal</b> — the assistant answers in Hindi, English or Hinglish, whichever the customer just wrote, and <b>▶ Play</b> reads any reply aloud.</sub></p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/console.png" alt="The agent console: escalated queue, a Hindi complaint, and the live intelligence panel showing severity Critical">
+<p align="center"><sub><b>Agent console</b> — a Hindi threat of consumer court, read as <b>Critical</b>, handed to a person, with the English gloss beside it.</sub></p>
+</td>
+</tr>
+</table>
+
+<img src="docs/images/dashboard.png" alt="The admin dashboard: totals, resolution split between AI, hybrid and human, and volume by category" width="100%">
+<p align="center"><sub><b>Admin dashboard</b> — who resolved what (AI · hybrid · human), CSAT, first-reply time and volume by category, across eight sections.</sub></p>
 
 ---
 
@@ -46,31 +71,30 @@ That gap is the whole project. Both results are reproduced, with their outputs s
 
 ## What it does
 
-<img src="docs/images/console.png" alt="The live console: sentiment, back-office lookups and a drafted reply" width="100%">
+Three workspaces behind one sign-in, and one pipeline behind all three.
 
-As a conversation happens, every customer turn is analysed and every agent turn is scored.
+| | For | What happens |
+|---|---|---|
+| 🧑 **Customer portal** | customers | Raise a ticket from 14 issue tags or in your own words, chat in any of ten languages or Hinglish, dictate instead of typing, hear any reply read aloud, rate the outcome. The interface itself switches language in place. |
+| 🎧 **Agent console** | agents | An escalated queue ordered most severe first, the live intelligence panel, an English gloss under any message in another script, a drafted reply, and a scorecard on every reply sent. |
+| 📊 **Admin dashboard** | admins | Eight sections — overview, work queue, SLA, cases, trends, knowledge gaps, the write-action audit trail and cost — with CSV and JSON export. |
+
+And underneath:
 
 | | |
 |---|---|
-| 🎯 **Conversation-aware analysis** | Sentiment, urgency and escalation risk judged over the **whole thread**, not one line at a time. A calmly-worded message scores 50 alone but 85 in context, because the customer is repeating a problem nobody fixed. |
-| 🔎 **Real back-office lookups** | Gemini function calling against a mock order system. It chains: reads the failed recharge, then looks up that order's refund — so the draft quotes `RF-9012, expected by 5 Sep`, not "we're looking into it." |
-| 📚 **Semantic knowledge base** | Gemini embeddings + cosine similarity. Keyword matching answered 8 of 12 paraphrased questions; semantic search answers **12 of 12**. Threshold `0.58`, measured rather than guessed. |
-| 🛡️ **PII redaction** | Phone numbers, emails, order ids and card numbers are replaced with placeholders *before* anything reaches Gemini — chat **and** embeddings — then restored in the reply. |
-| ✍️ **Drafted replies** | Grounded in the matched help article and the real lookup result, rated 👍/👎 by the agent. |
-| 📊 **Agent scorecard** | Tone, empathy and clarity, 1–10 against a published rubric. |
-| ⚡ **Auto-resolution** | A confident KB match (≥ `0.65`) on a low-risk case answers the customer directly and closes it. |
-| ⏱️ **SLA tracking** | Targets that vary by risk — high 15 min, medium 1 h, low 4 h — with a "breaching soon" panel. |
-| 🎙️ **Voice input** | Browser speech recognition, English or Hindi. No extra service, no extra cost. |
-| 🔐 **Accounts and roles** | Transcripts sit behind a login. `agent` gets the console and their own cases, `lead` adds the dashboard and the write-action gate, `admin` adds the exports. |
-| 💰 **Cost metering** | Every call's token count comes from the API itself, attributed to a case, an agent and a step — so you know what a conversation cost, and which step spent it. Daily token and spend caps refuse new work rather than running up a bill. |
-
-### The dashboard
-
-<img src="docs/images/dashboard.png" alt="The dashboard work queue" width="100%">
-
-Work queue (riskiest and oldest first) · deflection rate · SLA breaches · issues over day ·
-agent performance over time · suggestion acceptance · and **"questions we cannot answer"** —
-the list of help articles someone still needs to write.
+| ⚡ **Replies without the wait** | The request saves the message and returns in about **6 ms**; the model works on a background pool of four workers. A message sent mid-reply is merged, never lost. |
+| 🌐 **Ten languages + Hinglish** | The reply language is detected **per message** — script, Hindi/Marathi marker words, a Hinglish word list — so a customer who switches is answered in what they just used. Analysis stays in English for the dashboard. |
+| 🎯 **Conversation-aware analysis** | Intent (11 kinds, with a confidence), sentiment, six emotions, urgency, escalation risk and a 0–100 frustration score, judged over the **whole thread** as schema-checked JSON. |
+| 🚦 **Four-level severity** | Low · Medium · High · Critical, computed from those readings plus threat words ("consumer court", "police"), each level carrying the rule that produced it. High and Critical go to a person. |
+| 🙋 **A person when it matters** | Cancellations, billing disputes and any proposed refund always reach a human; the customer gets a handoff note in their language, and the case joins the queue. |
+| 🔒 **Write-action gate** | Refunds, expedites and account resets are **proposed, never run**. An admin approves each one, and every decision is recorded. |
+| 🔎 **Real back-office look-ups** | Gemini function calling against a mock order system, so a reply quotes `RF-9012, expected by 5 Sep`, not "we're looking into it." |
+| 📚 **Semantic knowledge base** | Gemini embeddings with a keyword fallback. A strong match (≥ `0.65`) on a calm case is answered and closed; a miss is logged as a knowledge gap for someone to write up. |
+| 🛡️ **PII redaction** | Phone numbers, emails, order ids and card numbers become placeholders *before* anything reaches Gemini — chat **and** embeddings — and are restored in the reply. |
+| 🧭 **Live coaching** | Every agent reply is scored 1–10 for tone, empathy and clarity, with one specific coaching tip. |
+| ⏱️ **Bounded, resilient calls** | Retries with backoff, model fallback, 20 s per request and a 45 s ceiling per call. When Gemini is unreachable the case goes to a person — nobody sees a raw error. |
+| 💰 **Cost metering** | Every call's tokens, attributed to a case, an agent and a step, priced in rupees, with daily caps that refuse work rather than run up a bill. |
 
 ---
 
@@ -80,8 +104,8 @@ the list of help articles someone still needs to write.
 > (no credit card).
 
 ```bash
-git clone https://github.com/AmanKumar-23/support-coach.git
-cd support-coach
+git clone https://github.com/AmanKumar-23/setu.git
+cd setu
 
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -92,10 +116,16 @@ cp orders.example.json orders.json                   # the mock order system
 python3 app/server.py
 ```
 
-On the first run it creates an **admin account** and prints the password once —
-copy it before the banner scrolls away.
+Open **<http://127.0.0.1:5001>**. On the first run the server creates an **admin** account and
+prints its password once — copy it before the banner scrolls away. It also seeds two demo
+accounts that the login page's one-click buttons use:
 
-Open **<http://127.0.0.1:5001>**, sign in, and press **Load demo**.
+| Account | Role | Lands in |
+|---|---|---|
+| `priya@support-coach.local` | customer | the portal |
+| `rahul@support-coach.local` | agent | the console |
+
+Both use the demo password `support-coach-demo` (set `DEMO_PASSWORD` to change it).
 
 <details>
 <summary><b>Running the notebook instead</b></summary>
@@ -122,6 +152,62 @@ PORT=8080 python3 app/server.py
 
 ---
 
+## Architecture
+
+<img src="docs/architecture/fig0-overview.png" alt="Setu at a glance: the customer on one side, the support team on the other, the Flask server, AI worker and decision engine on the bridge, Gemini above and SQLite beneath" width="100%">
+
+One Flask process serves the three workspaces. A background worker pool does all the model work,
+so a customer never waits on it. Every model call leaves through **one client** that redacts
+personal data first, retries, stays inside a time limit and is metered.
+
+| Diagram | |
+|---|---|
+| [Containers and the calls between them](docs/architecture/fig1-containers.png) | every page, route group, service and AI function |
+| [One customer message, end to end](docs/architecture/fig2-message-lifecycle.png) | the 13 steps, and the ≈ 6 ms the customer actually waits |
+| [Who answers a message](docs/architecture/fig3-who-answers.png) | the decision flow and the severity scale |
+| [Guarantees and where they are enforced](docs/architecture/table1-guarantees.png) | ten guarantees, each with the function that holds it |
+
+The written walkthrough — request flow, resilience, storage, access control and metering — is in
+**[docs/architecture.md](docs/architecture.md)**.
+
+> [!IMPORTANT]
+> **`app/coach_core.py` is generated. Do not edit it by hand.**
+> Change the notebook, then run `python3 app/build_core.py`. CI regenerates the file and fails
+> the build if it differs from what was committed, so the notebook and the app can never
+> quietly disagree.
+
+### Project layout
+
+```
+.
+├── customer_support_coach.ipynb   # source of truth: engine + the written analysis
+├── app/
+│   ├── build_core.py              # notebook  ──►  coach_core.py
+│   ├── coach_core.py              # GENERATED — AICoach, knowledge base, redaction, tools
+│   ├── pipeline.py                # the one customer turn: analyse, decide, answer or hand over
+│   ├── languages.py               # ten languages + Hinglish, per-message detection
+│   ├── actions.py                 # the write-action gate and its audit trail
+│   ├── auth.py                    # accounts, roles, sessions, lockout
+│   ├── metering.py                # token counting, pricing, daily caps
+│   ├── server.py                  # Flask: routes, SLA, analytics, SQLite store
+│   └── static/
+│       ├── login.html             # sign in, sign up, demo accounts
+│       ├── portal.html            # customer: tickets, issue tags, FAQ
+│       ├── portal-chat.html       # customer: one conversation
+│       ├── profile.html           # customer: details and password
+│       ├── index.html             # agent console
+│       ├── dashboard.html         # admin dashboard
+│       ├── i18n.js                # UI catalogue, switched in place
+│       └── voice.js               # speech recognition and playback
+├── tests/                         # pytest — runs with NO API key and no network
+├── docs/                          # architecture walkthrough, diagrams, screenshots
+├── .github/workflows/ci.yml       # tests · lint · notebook sync · secret scan
+├── orders.example.json            # copy to orders.json
+└── gemini_api_key.example.txt     # copy to gemini_api_key.txt
+```
+
+---
+
 ## Configuration
 
 The API key is resolved in this order — the first one found wins.
@@ -138,11 +224,13 @@ The API key is resolved in this order — the first one found wins.
 | Variable | Default | What it does |
 |---|---|---|
 | `GEMINI_API_KEY` | — | Your key. **Never commit it.** |
-| `GEMINI_MODEL` | `gemini-3.5-flash` | Generation model. Falls back to `gemini-3.5-flash-lite` on a rate limit. |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Generation model. Falls back to `gemini-3.5-flash` when it is busy. |
+| `GEMINI_EMBED_MODEL` | `gemini-embedding-001` | Embeddings for the knowledge base. |
 | `PORT` | `5001` | Port for the Flask app. |
 | `SECRET_KEY` | generated | Signs session cookies. Generated once and kept in the database, so a restart does not sign everyone out. |
-| `ADMIN_USERNAME` | `admin` | The first account, created on first boot only. |
+| `ADMIN_USERNAME` · `ADMIN_EMAIL` | `admin` · `admin@support-coach.local` | The first account, created on first boot only. |
 | `ADMIN_PASSWORD` | generated | Its password. Left unset, one is generated and printed once. |
+| `DEMO_PASSWORD` | `support-coach-demo` | The password of the two demo accounts. |
 | `PRICE_IN_INR_PER_MTOK` | `25.0` | **Placeholder.** Rupees per million input tokens. |
 | `PRICE_OUT_INR_PER_MTOK` | `75.0` | **Placeholder.** Rupees per million output tokens. |
 | `PRICE_EMBED_INR_PER_MTOK` | `2.0` | **Placeholder.** Rupees per million embedding tokens. |
@@ -156,172 +244,111 @@ These live in the code, next to a comment explaining how each number was arrived
 
 | Constant | Default | Where | Meaning |
 |---|---|---|---|
-| `SEMANTIC_THRESHOLD` | `0.58` | `app/coach_core.py` | Cosine similarity for a help article to count as a match. True matches measured 0.596–0.711, unanswerable ones never got above 0.559. |
-| `AUTO_RESOLVE_THRESHOLD` | `0.65` | `app/server.py` | Confidence needed to answer the customer with no agent at all — deliberately higher than the threshold used merely to *show* an article. |
-| `SLA_TARGET_MINUTES` | `{high: 15, medium: 60, low: 240}` | `app/server.py` | First-response target by escalation risk. |
-| `allow_writes` | `False` | runtime toggle | Refunds and password resets are **requested, not run**, until a person approves them. |
+| `SEMANTIC_THRESHOLD` | `0.58` | `app/coach_core.py` | Cosine similarity for a help article to count as a match. True matches measured 0.596–0.711; unanswerable ones never got above 0.559. |
+| `AUTO_RESOLVE_THRESHOLD` | `0.65` | `app/pipeline.py` | Match strength needed to answer and close a case with no agent at all. |
+| `HIGH_FROM` · `CRITICAL_FROM` | `70` · `85` | `app/pipeline.py` | Frustration at which a message is High or Critical on its own. Calibrated on the live model. |
+| `NEEDS_A_PERSON` | cancellation, billing dispute | `app/pipeline.py` | Intents that always go to a person. |
+| `LOOKUP_ONLY_UNDER_S` · `BESPOKE_HANDOFF_ONLY_UNDER_S` | `25` · `35` | `app/pipeline.py` | A slow turn skips the order look-up, then the custom handoff note. |
+| `REQUEST_TIMEOUT_MS` · `CALL_DEADLINE_S` | `20000` · `45` | `app/coach_core.py` | Per request, and for the whole call including retries. |
+| `SLA_TARGET_MINUTES` | high 15 · medium 60 · low 240 | `app/server.py` | First-response target by escalation risk. |
 
 ---
 
 ## Accounts and roles
 
-Customer transcripts sit behind a login. Three roles, each a superset of the
-one below it:
-
 | Role | Can reach |
 |---|---|
+| `customer` | **/portal** — their own tickets and profile, and nothing else. A different audience, kept out of the console entirely |
 | `agent` | The console, and the cases they own or claim |
-| `lead` | Everything an agent has, plus the dashboard and the **write-action gate** — deciding a refund may actually be issued |
-| `admin` | Everything a lead has, plus the bulk exports and account management |
+| `admin` | Everything an agent has, plus the dashboard, the **write-action gate**, the exports and account management |
 
-Accounts are created from the command line, never through the web app — an app
-that can mint its own admin does not really have roles.
+Customers can sign up from the login page. Staff accounts are created from the command line,
+never through the web app — an app that can mint its own admin does not really have roles.
 
 ```bash
 python3 app/server.py --list-users
-python3 app/server.py --add-user priya agent
-python3 app/server.py --passwd priya
-python3 app/server.py --disable-user priya
+python3 app/server.py --add-user meera agent
+python3 app/server.py --passwd meera
+python3 app/server.py --disable-user meera
+python3 app/server.py --enable-user meera
 ```
 
-The first admin is seeded on first boot. Set `ADMIN_USERNAME` and
-`ADMIN_PASSWORD` to choose it yourself, or let it generate a password and print
-it once. Only the scrypt hash is stored, so a lost password is reset, not
-recovered.
-
-Five wrong passwords parks an account for fifteen minutes. `/api/health` stays
-public so a container probe can reach it, but tells an anonymous caller only
-that the process is up.
+Passwords are stored as scrypt hashes; a lost one is reset, not recovered. Five wrong passwords
+park an account for fifteen minutes, and sessions last twelve hours.
 
 ---
 
 ## What it costs
 
-Every Gemini call reports how many tokens it used. That number is captured at
-the one place all calls pass through, attributed to a case, an agent and a step
-— analyse, look up, draft, score, embed — and priced.
+Every Gemini call reports how many tokens it used. That number is captured at the one place all
+calls pass through, attributed to a case, an agent and a step — analyse, look up, embed, draft,
+score, translate, handoff — and priced.
 
-**Tokens are measured and exact. Rupees are derived** from a rate table that is
-configuration, not fact. The rates shipped above are **placeholders**: they are
-the right shape and the wrong numbers, and the dashboard labels every figure
-"estimated rates" until you set the real ones.
+**Tokens are measured and exact. Rupees are derived** from a rate table that is configuration,
+not fact. The shipped rates are **placeholders**, and the dashboard labels every figure
+"estimated rates" until you set the real ones. The daily caps are checked at the start of a turn,
+before the model is called: a cap that only reports afterwards is not a cap.
 
-```bash
-export PRICE_IN_INR_PER_MTOK=…    # from the current Gemini price list
-export PRICE_OUT_INR_PER_MTOK=…
-```
-
-The **Cost** section of the dashboard shows today's usage against the cap,
-average cost per conversation, which step spends the most, and the priciest
-conversations. Opening any case shows that one conversation's bill broken down
-by step.
-
-### Ceilings
-
-Two daily caps and a per-agent rate limit. When one is hit, `/api/customer` and
-`/api/agent` answer **429 with a `Retry-After`** *before* calling the model —
-a cap that only reports afterwards is not a cap. They are checked at the start
-of a turn rather than before each individual call, so a turn already in flight
-finishes rather than leaving a reply quoting a lookup that never completed.
-
----
-
-## Architecture
-
-```
-                    customer_support_coach.ipynb
-                     (the source of truth — 37 cells)
-                                  │
-                       python3 app/build_core.py
-                                  │
-                                  ▼
-  ┌──────────────┐        ┌──────────────────┐        ┌──────────────────┐
-  │   Browser    │◄──────►│  app/server.py   │◄──────►│ app/coach_core.py│
-  │  console +   │  JSON  │  Flask · routes  │        │    GENERATED     │
-  │  dashboard   │        │  SLA · analytics │        │  AICoach engine  │
-  └──────────────┘        └────────┬─────────┘        └────────┬─────────┘
-                                   │                           │
-                            ┌──────▼──────┐        ┌───────────▼──────────┐
-                            │  cases.db   │        │   Gemini API         │
-                            │  (SQLite)   │        │ chat · embeddings ·  │
-                            └─────────────┘        │  function calling    │
-                                                   └───────────┬──────────┘
-                                                               │
-                                                    ┌──────────▼─────────┐
-                                                    │  orders.json       │
-                                                    │  mock back office  │
-                                                    └────────────────────┘
-```
-
-> [!IMPORTANT]
-> **`app/coach_core.py` is generated. Do not edit it by hand.**
-> Change the notebook, then run `python3 app/build_core.py`. CI regenerates the file and fails
-> the build if it differs from what was committed, so the notebook and the app can never
-> quietly disagree.
-
-Full walkthrough: **[docs/architecture.md](docs/architecture.md)**.
-
-### Project layout
-
-```
-.
-├── customer_support_coach.ipynb   # source of truth: engine + the written analysis
-├── app/
-│   ├── build_core.py              # notebook  ──►  coach_core.py
-│   ├── coach_core.py              # GENERATED — AICoach, KB, redaction, tools
-│   ├── auth.py                    # accounts, roles, sessions
-│   ├── metering.py                # token counting, pricing, daily caps
-│   ├── server.py                  # Flask: routes, SLA, analytics, SQLite store
-│   └── static/
-│       ├── index.html             # live console
-│       ├── dashboard.html         # dashboard
-│       ├── login.html             # sign in
-│       └── denied.html            # signed in, wrong role
-├── tests/                         # pytest — runs with NO API key
-├── docs/
-├── .github/workflows/ci.yml       # tests · lint · notebook-sync · secret scan
-├── orders.example.json            # copy to orders.json
-└── gemini_api_key.example.txt     # copy to gemini_api_key.txt
-```
+On the Gemini free tier, the limit that bites first is 15 requests per minute per model — roughly
+three customer messages a minute.
 
 ---
 
 ## Tests
 
-The suite runs **without an API key** — anything that would call Gemini is driven with fixed
-inputs or stubbed, so a fresh clone and a fork's pull request both run it in full.
+The suite runs **without an API key and without the network** — anything that would call Gemini
+is driven with fixed inputs or stubbed, and a guard fails any test that tries to reach the real
+API. A fresh clone and a fork's pull request both run it in full.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/ -v
+pytest tests/
 ```
 
 ```
-152 passed, 2 skipped
+519 passed, 2 skipped
 ```
 
-Covering redaction round-trips, SLA maths, the SQLite store and its JSON migration, the
-analytics, knowledge-base matching, the back-office tools, the function-calling loop,
-what each role can and cannot reach, and the token metering and its ceilings.
+The two skips are the semantic-search paths that need the live embeddings API; their keyword
+fallback is covered. The suite spans redaction round-trips, the async reply path and its locks,
+reply-language detection, severity and escalation, the write-action gate, the customer portal and
+profile, the UI catalogue, what each role can and cannot reach, SLA maths, analytics, the SQLite
+store and its migration, and the token metering and its ceilings.
 
 ---
 
 ## Security
 
-- Every page and every API route is behind a login, and behind a role. The only exception is
-  `/api/health`, which a container probe has to be able to reach — and which tells an
-  anonymous caller nothing beyond "the process is up".
-- Passwords are stored as scrypt hashes. Session cookies are `HttpOnly` and `SameSite=Lax`,
-  which is what stands between a cookie-authenticated API and cross-site request forgery.
-  Per-request CSRF tokens are the stronger answer and are not implemented yet.
+- Every page and every API route is behind a login and a role. The only exception is
+  `/api/health`, which tells an anonymous caller nothing beyond "the process is up".
+- A customer's view of a case goes through an **allow-list serializer**: sentiment, severity,
+  scores, coaching, look-ups and cost can never reach the customer, including any field added
+  later.
+- Passwords are scrypt hashes. Session cookies are `HttpOnly` and `SameSite=Lax`, which is what
+  stands between a cookie-authenticated API and cross-site request forgery. Per-request CSRF
+  tokens are the stronger answer and are on the roadmap.
 - `gemini_api_key.txt`, `app/cases.db` and `orders.json` are git-ignored — they hold secrets,
   password hashes or real transcripts. The repo ships `.example` files instead.
 - Customer text is redacted before it reaches Gemini, on both the chat and embeddings paths.
-- Write-capable tools never fire on their own: `issue_refund` and `send_password_reset` are
-  recorded as *requested* and wait for a human.
-- CI greps every commit for API-key patterns and fails if one appears.
+- Write-capable tools never fire on their own: customers' turns never carry them, an agent's
+  turn can only propose one, and an admin's click is the one place a write ever runs. Every
+  proposal and decision is recorded in the **Actions** audit trail.
+- CI greps every commit for API-key patterns and live data files, and fails if one appears.
 
 Found a problem? See **[SECURITY.md](SECURITY.md)**.
+
+---
+
+## Roadmap
+
+- **Team routing** — send escalations to Accounts, Refunds or Technical by intent, instead of one
+  shared queue.
+- **A narrative handoff summary** — a short account of the conversation for the agent who takes
+  over, beside the key issue and severity reasons.
+- **Escalation on low confidence** — the intent confidence is already extracted; route on it,
+  and on knowledge-base misses.
+- **Customer history in the console** — earlier tickets and summaries for the same customer.
+- **Per-request CSRF tokens**, and **scale-out** beyond a single process.
 
 ---
 
