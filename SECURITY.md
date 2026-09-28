@@ -29,7 +29,7 @@ It happens. Speed matters more than tidiness:
 
 | Asset | How |
 |---|---|
-| `gemini_api_key.txt` | Git-ignored. The repo ships `gemini_api_key.example.txt` with an empty value. |
+| `gemini_api_key.txt` | Git-ignored. Created locally from the README's quick start; the repo ships no key file. |
 | `app/cases.db` | Git-ignored — it holds real conversation transcripts. |
 | `orders.json` | Git-ignored. `orders.example.json` is committed instead. |
 | Customer PII | Phone numbers, emails, order ids and card numbers are replaced with placeholders **before** any text reaches Gemini, on both the chat and the embeddings path, then restored in the drafted reply. |
