@@ -15,12 +15,12 @@
         font-family="'Noto Sans Devanagari','Mukta','Nirmala UI','Devanagari Sangam MN','Mangal',sans-serif"
         >से</text>
 
-  <text x="140" y="70" font-size="44" font-weight="700" fill="#16130F"
+  <text x="140" y="70" font-size="44" font-weight="700" fill="#F3EEE8"
         font-family="'Noto Sans Devanagari','Mukta','Nirmala UI','Devanagari Sangam MN','Mangal','Segoe UI',Inter,system-ui,sans-serif"
         >सेतु</text>
   <text x="222" y="70" font-family="'Segoe UI',Inter,system-ui,-apple-system,sans-serif"
-        font-size="44" font-weight="700" fill="#16130F">· Setu</text>
+        font-size="44" font-weight="700" fill="#F3EEE8">· Setu</text>
   <text x="142" y="102" font-family="'SF Mono',Menlo,Consolas,monospace"
-        font-size="17" letter-spacing="1.5" fill="#8A817A"
+        font-size="17" letter-spacing="1.5" fill="#A39A92"
         textLength="404" lengthAdjust="spacingAndGlyphs">AI WHERE IT'S SAFE. HUMAN WHERE IT MATTERS.</text>
 </svg>

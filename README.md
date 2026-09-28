@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="docs/images/logo.svg" alt="सेतु · Setu" width="440">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+  <img src="docs/images/logo.svg" alt="सेतु · Setu" width="440">
+</picture>
 
 ### AI where it's safe. Human where it matters.
 
