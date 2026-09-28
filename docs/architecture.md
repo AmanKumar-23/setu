@@ -12,9 +12,6 @@ How the pieces fit, and why they are arranged this way.
 | [**Who answers**](architecture/fig3-who-answers.png) | The decision flow that picks the assistant or a person, with the severity scale |
 | [**Guarantees**](architecture/table1-guarantees.png) | Ten guarantees and the function that enforces each |
 
-Vector sources sit beside each PNG, and [`architecture/setu-architecture.html`](architecture/setu-architecture.html)
-is the whole sheet as one page.
-
 ---
 
 ## The notebook is the source of truth
