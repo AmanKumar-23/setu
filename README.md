@@ -113,7 +113,7 @@ cd setu
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-cp gemini_api_key.example.txt gemini_api_key.txt     # then paste your key after the "="
+printf 'GEMINI_API_KEY=\n' > gemini_api_key.txt   # then paste your key after the "="
 cp orders.example.json orders.json                   # the mock order system
 
 python3 app/server.py
@@ -205,8 +205,7 @@ The written walkthrough — request flow, resilience, storage, access control an
 ├── tests/                         # pytest — runs with NO API key and no network
 ├── docs/                          # architecture walkthrough, diagrams, screenshots
 ├── .github/workflows/ci.yml       # tests · lint · notebook sync · secret scan
-├── orders.example.json            # copy to orders.json
-└── gemini_api_key.example.txt     # copy to gemini_api_key.txt
+└── orders.example.json            # copy to orders.json
 ```
 
 ---
@@ -331,7 +330,7 @@ store and its migration, and the token metering and its ceilings.
   stands between a cookie-authenticated API and cross-site request forgery. Per-request CSRF
   tokens are the stronger answer and are on the roadmap.
 - `gemini_api_key.txt`, `app/cases.db` and `orders.json` are git-ignored — they hold secrets,
-  password hashes or real transcripts. The repo ships `.example` files instead.
+  password hashes or real transcripts. The repo ships `orders.example.json` in place of the order data, and the key file is created locally.
 - Customer text is redacted before it reaches Gemini, on both the chat and embeddings paths.
 - Write-capable tools never fire on their own: customers' turns never carry them, an agent's
   turn can only propose one, and an admin's click is the one place a write ever runs. Every

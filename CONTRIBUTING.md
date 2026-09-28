@@ -40,7 +40,7 @@ cd setu
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
-cp gemini_api_key.example.txt gemini_api_key.txt   # paste your key after the "="
+printf 'GEMINI_API_KEY=\n' > gemini_api_key.txt   # paste your key after the "="
 cp orders.example.json orders.json
 
 pytest tests/ -q          # should be green before you change anything
