@@ -53,6 +53,11 @@ def no_network(request, monkeypatch):
     search tests, which opt in explicitly with GEMINI_API_KEY set."""
     if request.node.get_closest_marker("live_api") and os.getenv("GEMINI_API_KEY"):
         return
+    # A placeholder key, so nothing goes looking for a real one. Without it
+    # the lookup falls through to the developer's gemini_api_key.txt -- which
+    # is how this suite passed locally and failed in CI -- and, on a machine
+    # with no key file, to a getpass prompt that has no terminal to read.
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
     import coach_core
     monkeypatch.setattr(coach_core.genai, "Client", _NoNetworkClient)
     # A client built before the patch -- the embeddings one is cached.
