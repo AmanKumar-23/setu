@@ -7,168 +7,98 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-09-28
+
+**Setu.** The coaching console grows into a support desk with three workspaces: customers are
+answered directly, in their own language, and handed to a person the moment a machine should not
+be the one deciding.
+
 ### Added
 
-- **The customer workspace.** `/portal` lists a customer's own tickets with three states —
-  Handled by AI, A human agent is reviewing, Resolved — and `/portal/chat/<id>` carries the
-  conversation. Raising a ticket runs the same pipeline the console runs; the turn moved
-  into `app/pipeline.py` and takes the session it works on, so the portal can use a
-  short-lived one per request instead of the console's process-wide global.
-- **Customers can rate a resolved ticket** — five stars and an optional line, changeable
-  for 24 hours. The storage and the dashboard tile already existed; what was missing was
-  somewhere for the person with the opinion to answer from. Both routes call the same
-  `record_csat()`, so the rules have one implementation.
+- **The customer workspace.** `/portal` lists a customer's own tickets — Handled by AI, A human
+  agent is reviewing, Resolved — and `/portal/chat/<id>` carries the conversation. Fourteen issue
+  tags open a real ticket in one click, an FAQ card answers common questions before they become
+  tickets, a profile page shows the account and changes what is safe to change, and a resolved
+  ticket can be rated with five stars and a line, editable for 24 hours.
+- **Replies in ten languages and Hinglish.** The reply language is detected per message — script
+  ranges, Hindi/Marathi marker words, a Hinglish word list — so a customer who switches mid-chat
+  is answered in what they just used. Analysis stays in English, so the queue and the dashboard
+  read one vocabulary. See [`app/languages.py`](app/languages.py).
+- **The whole portal UI switches language without a reload.** English and a hand-written Hindi
+  catalogue ship with the app; other languages are translated once by the model, metered as their
+  own step, and cached.
+- **Voice in both directions, on browser APIs only.** Dictation shows interim words as they
+  settle and never sends on its own; every AI reply has a Play button that picks a voice by the
+  message's script, and a low-confidence transcript is flagged rather than sent silently.
+- **An English gloss** under any customer message written in another script, in the console.
+- **Four-level severity.** Low · Medium · High · Critical, computed from the model's readings —
+  frustration 0–100, escalation risk, emotion, intent, urgency — plus threat words such as
+  "consumer court" and "police". Each level records the rule that produced it.
+- **Escalation to a person.** High and Critical severity, cancellations, billing disputes and any
+  proposed write hand the case to a human, with a handoff note in the customer's language. The
+  work queue is ordered by severity, then by the longest wait.
+- **Intent and emotion extraction** — eleven intents with a confidence, six emotions, and the
+  reading kept against each message so a conversation can be read back turn by turn.
+- **Write actions behind a human gate.** `initiate_refund`, `expedite_delivery` and
+  `reset_account_access` can only be proposed; an admin's **Approve and run** is the one place a
+  write executes. An **Actions** audit trail records every proposal and decision.
+- **Three roles, three workspaces** — `customer`, `agent`, `admin` — with sign-in by email or
+  username, role cards, one-click demo accounts and customer sign-up. Passwords are scrypt hashes,
+  five wrong attempts lock an account for fifteen minutes, and sessions last twelve hours.
+- **The work queue inside the console** — search, severity filters, keyboard navigation, and the
+  open case shown selected.
+- **Dashboard: who resolved what** (AI autonomous · hybrid · human), CSAT and median first-reply
+  tiles, volume by category, and an interactive Trends section with 24 h / 7 d / 14 d / 30 d
+  ranges and PNG and JSON export per chart.
+- **Token metering and cost per conversation**, attributed to a case, an agent and a step, with
+  daily token and spend caps and a per-agent rate limit that refuse work before the model runs.
+- **Architecture diagrams** in [`docs/architecture/`](docs/architecture/): an illustrated
+  overview, the container view, one message end to end, and the decision flow.
 
 ### Changed
 
-- **Three roles, three workspaces.** `lead` is retired and folded into `admin`; `customer`
-  is new. A customer raises and tracks tickets in **/portal**, an agent works escalated
-  cases in the console, and an admin adds the dashboard, the write-action gate and the
-  exports. Accounts still on `lead` are moved to `admin` on boot rather than left holding a
-  role that no longer exists.
-- **A wrong turn sends you to your own workspace**, not to a 403 page. `/denied` is gone.
-  `/portal` is guarded by role membership rather than rank, so an admin — who outranks a
-  customer — is kept out of the customer's workspace just as firmly.
-- **The console is the agent's alone.** The Customer / Agent toggle is gone; what you type
-  is always an agent reply, and the composer says whose. The six Common Issues chips now
-  fill the agent's reply box with an opening line instead of a customer's complaint.
-- **Sign-up creates a customer, not an agent.** Somebody who finds the login page and makes
-  an account is a person with a problem, not a member of staff.
-
-### Added
-
-- **Login by email, with a role selector and one-click demo accounts.** The chosen card is
-  checked against the account rather than trusted — picking Admin does not make you one.
-
-
-- **The work queue is in the console**, as a third column: search, All / Critical / High
-  filters, click-to-open with no page reload, the open case shown selected, and `j` / `k` /
-  `Enter` to move and open. It refreshes after every send and every resolve. The ordering is
-  `work_queue()`'s — the same function the dashboard uses — served through a new
-  `/api/queue` that an agent can reach, since `/api/stats` is lead-only.
-  Three columns above 1100px, a drawer below it, and one column with a tab switcher below
-  700px.
+- **Renamed to सेतु · Setu.** Names and visuals only — routes, data, case ids (`SC-`) and
+  behaviour are unchanged.
+- **A ticket is raised in milliseconds.** The request saves the message and returns (≈ 6 ms);
+  the model works on a pool of four background workers, one per case, and a message sent during
+  a reply is merged into the next turn rather than lost.
+- **One pipeline, two callers.** The customer turn lives in [`app/pipeline.py`](app/pipeline.py);
+  the portal and the console both call it, so there is no second analyse-or-reply path.
+- **`allow actions` withholds the write tools** instead of declining to run them, and customers'
+  turns never carry them at all.
+- **`lead` is retired** and folded into `admin`; accounts still on it are moved on boot. A wrong
+  turn now sends a user to their own workspace instead of a 403 page.
+- **Every model call is bounded:** 20 s per request and 45 s for the whole call, with no attempt
+  started past the ceiling. A slow turn skips the order look-up after 25 s and the bespoke
+  handoff note after 35 s.
+- The default model is `gemini-3.5-flash-lite`, falling back to `gemini-3.5-flash`.
 
 ### Fixed
 
-- **The console header scrolled the page sideways on a phone.** It had no layout below
-  1020px at all; at 640px the row was 1278px wide. It now wraps, and the quick-pick strip
-  scrolls within itself instead of dragging the document with it.
+- **High meant "a complaint about money", not real trouble.** 58 % of live messages were being
+  escalated; the thresholds were recalibrated on the live model so a routine "recharge failed,
+  money taken" stays with the assistant.
+- **A dropped Gemini connection surfaced as a raw error.** Transport failures are now retried
+  like a busy server, and when the model is unreachable the case goes to a person with a
+  "we have your message" note — nobody sees a stack trace.
+- **The 45 s ceiling could be overshot** (59.9 s measured); it is now enforced before each attempt.
+- **Hindi fell back to English** because the server overwrote the Hindi catalogue.
+- **Opening a case showed an empty scorecard** when a suggestion already existed.
+- **An account could not sign back in** with the email it registered with.
+- **Only agents are recorded as a case's owner**, never a customer.
+- **Ticking `allow actions` let the model execute writes** with no human step.
+- **The function-calling loop could never chain two look-ups** — results went back with a role
+  the API rejects. It now reads a failed order, then looks up that order's refund.
+- **A malformed request was retried against every model**; `400 INVALID_ARGUMENT` now fails fast.
+- **The console header scrolled the page sideways on a phone.**
 
-- **Customer satisfaction.** `csat_score`, `csat_comment` and `csat_at` on the case, with a
-  rating API that accepts one rating per resolved case and keeps it editable for 24 hours.
-  The dashboard gains a **CSAT** tile (average out of 5 with the response rate), an
-  **Avg first reply** tile (median, labelled as such), a CSAT line on the scores chart
-  against its own 1–5 axis, **Satisfaction by who resolved it** as three bars, and a
-  **Volume by category** panel driven by intent and falling back to the matched help
-  article. Any average over fewer than 10 ratings is shown faintly with its sample size
-  rather than hidden or presented as settled.
-  The collection UI is not built: it belongs on `/portal`, which does not exist yet.
+### Security
 
-- **Voice in both directions, on browser APIs only.** Dictation now shows interim words grey
-  inside the message box and firms them up as they settle; every AI-composed reply gets a
-  Play button backed by `speechSynthesis`, picking a voice by the message's own script so a
-  Hindi reply is read by a Hindi voice. A **Voice** switch in the header puts every voice
-  control away for presenting somewhere noisy, and a low-confidence transcript is flagged
-  "check this transcript" rather than sent silently.
-- **Messages record how they arrived** — dictated or typed — and the transcript shows a small
-  mic on the dictated ones. Voice is an input method: the text goes down exactly the same
-  pipeline either way.
-
-### Changed
-
-- **An unsupported browser now disables the mic instead of hiding it**, with a tooltip saying
-  which browsers can do it. A control that vanishes reads as a bug; a disabled one with a
-  reason reads as an answer.
-
-- **Trends is interactive.** A 24h / 7d / 14d / 30d range toggle above the charts, remembered
-  in `localStorage` and defaulting to 7 days; hover and touch tooltips carrying every series
-  value plus a derived line; PNG and JSON export per chart. The 24-hour view buckets by hour,
-  because a day split into days is one or two bars. Still hand-written SVG — the PNG export
-  serialises the chart onto a canvas rather than shipping a rendering library.
-
-- **Resolution mode on every case** — `ai_autonomous`, `hybrid` or `human`, derived from
-  who composed each outgoing message rather than typed in anywhere. Messages now carry a
-  `source`, set when they are sent; older cases were backfilled on first boot by the same
-  rules, so the live value and the historical one mean the same thing.
-- **Dashboard: who resolved what.** A three-way split under Resolution progress with counts
-  and shares, "AI handled end to end" and "Human touch rate" beside it, a *Resolved by*
-  column and filter on Cases, and a stacked area on Trends showing the three modes over
-  time — hand-drawn SVG, matching the existing charts.
-
-- **Write actions, behind a human gate.** `initiate_refund`, `expedite_delivery` and
-  `reset_account_access` replace `issue_refund` and `send_password_reset`. The model can
-  propose one; only a person clicking **Approve and run** executes one.
-- **An Actions audit trail**, on the dashboard beside Cases, with the same search, filters
-  and CSV export. Every proposal and every decision is recorded — including the refused
-  ones — with the case, who proposed, who decided and when.
-
-### Changed
-
-- **`allow actions` now withholds the tools rather than declining to run them.** With the
-  box unticked the write declarations are no longer sent to the Gemini API at all, so the
-  model has no function to call.
-
-### Fixed
-
-- **Ticking `allow actions` used to let the model execute writes with no human step.**
-  `gather_facts()` ran any write tool directly once `allow_writes` was set, so a refund
-  could be issued without anyone clicking anything. The loop now records a proposal and
-  never executes a write, whatever that flag says. The checkbox's tooltip and toast, which
-  both said refunds "will now be carried out for real", described that behaviour accurately
-  and have been rewritten.
-
-- **The function-calling loop could never chain two lookups.** Function results were sent back
-  with `role="tool"`, which the Gemini API rejects outright (`Role 'tool' is not supported`).
-  Round 1 worked, so the feature looked healthy in the UI, but every round after it returned
-  400 — and the failure was swallowed into a `(lookup unavailable)` note, so nothing reached the
-  log. Results now go back as `role="user"`, and the coach can read a failed order and then look
-  up that order's refund.
-- **A malformed request was retried against every model.** A `400 INVALID_ARGUMENT` means the
-  request is wrong, not the model, so the fallback was guaranteed to fail identically — it only
-  doubled the latency and quota spent before giving up. These now fail fast.
-
-### Added
-
-- **Accounts and roles.** Every page and every API route now sits behind a login and a role —
-  `agent` (console, own cases), `lead` (+ dashboard, + the write-action gate), `admin`
-  (+ bulk exports). Until now anyone who could reach the port could read every saved customer
-  transcript, which sat badly next to a product that masks personal data before it reaches the
-  model. See [`app/auth.py`](app/auth.py).
-- Passwords stored as scrypt hashes, a fifteen-minute lockout after five failed attempts, and
-  `HttpOnly` / `SameSite=Lax` session cookies. The cookie signing key is generated once and kept
-  in the database, so a restart no longer signs everyone out.
-- Account management from the command line — `--list-users`, `--add-user`, `--passwd`,
-  `--disable-user`, `--enable-user`. Accounts cannot be created through the web app on purpose.
-- Cases record the agent who opened them (`owner`), and an agent can only open their own or an
-  unclaimed one. Cases from before this change are unowned and claimed by whoever opens them.
-- A sign-in page, a "signed in but wrong role" page, and a user chip with sign-out in both front
-  ends. Controls a role cannot use are hidden rather than left to fail with a 403.
-- 47 tests covering role boundaries, lockout, ownership and the post-login redirect.
-- Regression tests for the function-calling loop, including an assertion that every turn carries
-  a role the API accepts.
-
-- **Token metering and cost per conversation.** Every Gemini call now reports its own token
-  counts, which are attributed to a case, an agent and a step (analyse, look up, draft, score,
-  embed) and priced. The dashboard gained a **Cost** section, and each case shows its own bill.
-  Counting API calls was the wrong unit: analysing one short message and drafting a grounded
-  reply are both "one call" and differ by an order of magnitude. See [`app/metering.py`](app/metering.py).
-- **Daily caps and a per-agent rate limit.** `DAILY_TOKEN_CAP`, `DAILY_COST_CAP_INR` and
-  `RATE_LIMIT_CALLS_PER_MIN` refuse new work with a 429 and a `Retry-After` *before* the model
-  is called. Any of them set to `0` is switched off.
-- 26 tests for metering, pricing, the ceilings and the engine's usage hook.
-
-### Changed
-
-- The engine gained a `USAGE_HOOK` (notebook cells 1, 17 and 28). It announces the token cost
-  of each call and knows nothing about storage, pricing or budgets — metering policy stays in
-  the app, not in the coaching logic.
-- A new case is given its id *before* the first model call, so the opening turn of every
-  conversation is billed to a case instead of to nothing.
-- `/api/health` stays public so a container probe can reach it, but now tells an anonymous
-  caller only that the process is up — the key path and model name need a login.
-- The `cases` table gained an `owner` column, applied to an existing database by a guarded
-  migration on startup.
+- The customer's view of a case goes through an allow-list serializer, so analysis, severity,
+  scores, coaching, look-ups and cost can never reach a customer — including fields added later.
+- The test suite can no longer reach the real Gemini API: a guard replaces the client, and live
+  tests must opt in.
+- `/api/health` tells an anonymous caller only that the process is up.
 
 ---
 
@@ -206,5 +136,6 @@ while the Gemini-backed analyser reads it as `negative` with frustration 85/100.
 (English) escalates `35 → 35 → 43 → 94` and fires red; Step 17 (Hinglish) stays green throughout.
 The escalation tracker was correct. The signal feeding it was not.
 
-[Unreleased]: https://github.com/AmanKumar-23/support-coach/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/AmanKumar-23/support-coach/releases/tag/v0.1.0
+[Unreleased]: https://github.com/AmanKumar-23/setu/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/AmanKumar-23/setu/compare/v0.1.0...v1.0.0
+[0.1.0]: https://github.com/AmanKumar-23/setu/releases/tag/v0.1.0
